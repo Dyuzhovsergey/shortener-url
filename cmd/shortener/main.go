@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -38,7 +40,48 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func generateID() {
+func handlePost(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.Error(w, "Bad POST request ", http.StatusBadRequest)
+		return
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil || len(body) == 0 {
+		http.Error(w, "Error read body or len bbody = 0", http.StatusBadRequest)
+		return
+	}
+	originalURL := strings.TrimSpace(string(body))
+	if originalURL == "" || !strings.HasPrefix(originalURL, "http") {
+		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		return
+	}
+
+	//create short id
+	shortID := generateID()
+	ulrStore[shortID] = originalURL
+
+	shortURL := fmt.Sprintf("%s%s", baseURL, &shortID)
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusCreated)
+	w.Write([]byte(shortURL))
+}
+
+func handleGet(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/")
+	if id == "" {
+		http.Error(w, "Bad GET request", http.StatusBadRequest)
+		return
+	}
+	originalURL, exists := ulrStore[id]
+	if !exists {
+		http.Error(w, "URL not found", http.StatusBadGateway)
+	}
+	w.Header().Set("Location", originalURL)
+	w.WriteHeader(http.StatusTemporaryRedirect)
+}
+
+func generateID() string {
 	randSrc := rand.New(rand.NewSource(time.Now().UnixNano()))
 	id := make([]byte, idLength)
 
@@ -46,4 +89,5 @@ func generateID() {
 		index := randSrc.Intn(len(charSet))
 		id[i] = charSet[index]
 	}
+	return string(id)
 }
