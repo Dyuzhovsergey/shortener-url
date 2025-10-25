@@ -32,9 +32,9 @@ func main() {
 func handleRequest(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
-		handlePost(r, w)
+		handlePost(w, r)
 	case http.MethodGet:
-		handleGet(r, w)
+		handleGet(w, r)
 	default:
 		http.Error(w, "Method not allowed server", http.StatusMethodNotAllowed)
 	}
