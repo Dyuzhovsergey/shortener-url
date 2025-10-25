@@ -60,7 +60,7 @@ func handlePost(w http.ResponseWriter, r *http.Request) {
 	shortID := generateID()
 	ulrStore[shortID] = originalURL
 
-	shortURL := fmt.Sprintf("%s%s", baseURL, &shortID)
+	shortURL := fmt.Sprintf("%s/%s", baseURL, shortID)
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
