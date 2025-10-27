@@ -6,10 +6,17 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 )
+
+func setupTestRepo() {
+	repo = repository.NewMemoryRepository()
+}
 
 // Тест на POST-запрос — проверяем, что сервер создаёт короткий URL
 func TestHandlePost(t *testing.T) {
+	setupTestRepo()
 	// создаём поддельный HTTP-запрос
 	body := "https://practicum.yandex.ru/"
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
@@ -39,10 +46,15 @@ func TestHandlePost(t *testing.T) {
 
 // Тест на GET-запрос — проверяем, что сервер делает редирект
 func TestHandleGet(t *testing.T) {
+	setupTestRepo()
 	// добавляем в хранилище тестовые данные
 	testID := "test123"
 	testURL := "https://example.com"
-	ulrStore[testID] = testURL
+
+	// сохраняем тестовые данные в репозиторий
+	if err := repo.Save(testID, testURL); err != nil {
+		t.Fatalf("ошибка при добавлении тестовых данных: %v", err)
+	}
 
 	// создаём поддельный HTTP-запрос
 	req := httptest.NewRequest(http.MethodGet, "/"+testID, nil)
