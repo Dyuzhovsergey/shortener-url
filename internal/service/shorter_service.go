@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Dyuzhovsergey/shortener-url/internal/config"
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 )
 
 const (
-	charSet  = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	idLength = 8
 )
 
@@ -50,9 +50,9 @@ func (svc *ShorterService) GetOriginalURL(shortID string) (string, bool) {
 // generateID — генерирует случайный shortID.
 func (svc *ShorterService) generateID() string {
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
-	id := make([]byte, idLength)
+	id := make([]byte, config.Param.LengthID)
 	for i := range id {
-		id[i] = charSet[rnd.Intn(len(charSet))]
+		id[i] = config.Param.CharSet[rnd.Intn(len(config.Param.CharSet))]
 	}
 	return string(id)
 }
