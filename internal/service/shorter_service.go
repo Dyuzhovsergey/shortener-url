@@ -1,0 +1,58 @@
+// Package service for bissnes logic projecr
+package service
+
+import (
+	"errors"
+	"math/rand"
+	"strings"
+	"time"
+
+	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
+)
+
+const (
+	charSet  = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	idLength = 8
+)
+
+// ShorterService отвечает за бизнес-логику: валидацию, генерацию ID и сохранение ссылок.
+type ShorterService struct {
+	repo repository.Repository
+}
+
+// NewShorterService - Конструктор с внедрением зависимости (DI)
+func NewShorterService(repo repository.Repository) *ShorterService {
+	return &ShorterService{repo: repo}
+}
+
+// CreateShortURL — создаёт короткую ссылку и сохраняет её.
+func (svc *ShorterService) CreateShortURL(originalURL string, baseURL string) (string, error) {
+	originalURL = strings.TrimSpace(originalURL)
+	if originalURL == "" || !strings.HasPrefix(originalURL, "http") {
+		return "", errors.New("invalid URL format")
+	}
+
+	shortID := svc.generateID()
+
+	if err := svc.repo.Save(shortID, originalURL); err != nil {
+		return "", err
+	}
+
+	shortURL := baseURL + "/" + shortID
+	return shortURL, nil
+}
+
+// GetOriginalURL — возвращает оригинальный URL по shortID.
+func (svc *ShorterService) GetOriginalURL(shortID string) (string, bool) {
+	return svc.repo.Get(strings.TrimSpace(shortID))
+}
+
+// generateID — генерирует случайный shortID.
+func (svc *ShorterService) generateID() string {
+	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	id := make([]byte, idLength)
+	for i := range id {
+		id[i] = charSet[rnd.Intn(len(charSet))]
+	}
+	return string(id)
+}

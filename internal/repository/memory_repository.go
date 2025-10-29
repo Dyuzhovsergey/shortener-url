@@ -16,17 +16,17 @@ func NewMemoryRepository() *MemoryRepository {
 }
 
 // Save сохраняет оригинальный URL по shortID.
-func (m *MemoryRepository) Save(shortID, originalURL string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.data[shortID] = originalURL
+func (repo *MemoryRepository) Save(shortID, originalURL string) error {
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	repo.data[shortID] = originalURL
 	return nil
 }
 
 // Get возвращает оригинальный URL по shortID.
-func (m *MemoryRepository) Get(shortID string) (string, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	url, ok := m.data[shortID]
+func (repo *MemoryRepository) Get(shortID string) (string, bool) {
+	repo.mu.RLock()
+	defer repo.mu.RUnlock()
+	url, ok := repo.data[shortID]
 	return url, ok
 }
