@@ -11,10 +11,6 @@ import (
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 )
 
-const (
-	idLength = 8
-)
-
 // ShorterService отвечает за бизнес-логику: валидацию, генерацию ID и сохранение ссылок.
 type ShorterService struct {
 	repo repository.Repository
