@@ -13,13 +13,13 @@ import (
 const baseURL = "http://localhost:8080"
 
 func main() {
-	// 1️⃣ создаём репозиторий (хранилище)
+	// создаём репозиторий (хранилище)
 	repo := repository.NewMemoryRepository()
 
-	// 2️⃣ создаём сервис и внедряем репозиторий
+	// создаём сервис и внедряем репозиторий
 	shorter := service.NewShorterService(repo)
 
-	// 3️⃣ создаём HTTP-сервер и внедряем сервис
+	// создаём HTTP-сервер и внедряем сервис
 	server := handler.NewHTTPServer(baseURL, shorter)
 
 	fmt.Printf("Server run on: %s\n", baseURL)
