@@ -38,6 +38,9 @@ func TestHandlePost(t *testing.T) {
 	if res.StatusCode != http.StatusCreated {
 		t.Errorf("ожидался статус %d, получили %d", http.StatusCreated, res.StatusCode)
 	}
+	if res.Header.Get("Content-Type") != "text/plain" {
+		t.Errorf("ожидался заголовок 'text/plain', получили %s", res.Header.Get("Content-Type"))
+	}
 	if !strings.HasPrefix(string(body), "http://localhost:8080/") {
 		t.Errorf("ожидался короткий URL с префиксом http://localhost:8080/, получили %s", string(body))
 	}

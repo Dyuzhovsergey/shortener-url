@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/Dyuzhovsergey/shortener-url/internal/service"
 )
 
@@ -25,21 +27,10 @@ func NewHTTPServer(baseURL string, shorter *service.ShorterService) *HTTPServer 
 
 // Router — возвращает готовый http.Handler (ServeMux)
 func (srv *HTTPServer) Router() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", srv.handleRequest)
-	return mux
-}
-
-// handleRequest распределяет методы
-func (srv *HTTPServer) handleRequest(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodPost:
-		srv.handlePost(w, r)
-	case http.MethodGet:
-		srv.handleGet(w, r)
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
+	r := chi.NewRouter()
+	r.Post("/", srv.handlePost)
+	r.Get("/{id}", srv.handleGet)
+	return r
 }
 
 // POST /
@@ -63,6 +54,7 @@ func (srv *HTTPServer) handlePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Content-Length", "30")
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(shortURL))
 }
