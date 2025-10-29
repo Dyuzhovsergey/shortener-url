@@ -38,7 +38,7 @@ func (svc *ShorterService) CreateShortURL(originalURL string, baseURL string) (s
 	return shortURL, nil
 }
 
-// GetOriginalURL — возвращает оригинальный URL по shortID.
+// GetOriginalURL — возвращает оригинальный URL по shortID
 func (svc *ShorterService) GetOriginalURL(shortID string) (string, bool) {
 	return svc.repo.Get(strings.TrimSpace(shortID))
 }
