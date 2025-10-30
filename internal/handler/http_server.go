@@ -4,7 +4,6 @@ package handler
 import (
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -60,7 +59,7 @@ func (srv *HTTPServer) handlePost(w http.ResponseWriter, r *http.Request) {
 
 // GET /{id}
 func (srv *HTTPServer) handleGet(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/")
+	id := chi.URLParam(r, "id")
 	if id == "" {
 		http.Error(w, "Bad GET request", http.StatusBadRequest)
 		return

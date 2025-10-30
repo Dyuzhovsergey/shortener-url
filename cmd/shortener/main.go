@@ -23,8 +23,8 @@ func main() {
 	// создаём HTTP-сервер и внедряем сервис
 	server := handler.NewHTTPServer(config.Param.BaseURL, shorter)
 
-	fmt.Printf("Server run on: %s\n", config.Param.BaseURL)
-	if err := http.ListenAndServe(":8080", server.Router()); err != nil {
+	fmt.Printf("Server run on: http://%s\n", config.FlagRunAddr)
+	if err := http.ListenAndServe(config.FlagRunAddr, server.Router()); err != nil {
 		log.Fatal(err)
 	}
 }
