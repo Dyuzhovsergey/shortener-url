@@ -10,5 +10,5 @@ type ShortenerConfig struct {
 var Param = &ShortenerConfig{
 	CharSet:  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
 	LengthID: 8,
-	BaseURL:  "http://localhost:8080/",
+	BaseURL:  "http://localhost:8080",
 }

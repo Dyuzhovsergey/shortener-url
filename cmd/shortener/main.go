@@ -5,14 +5,15 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/Dyuzhovsergey/shortener-url/internal/config"
 	"github.com/Dyuzhovsergey/shortener-url/internal/handler"
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 	"github.com/Dyuzhovsergey/shortener-url/internal/service"
 )
 
-const baseURL = "http://localhost:8080"
-
 func main() {
+	// парсим флаги (-a и -b)
+	config.ParseFlags()
 	// создаём репозиторий (хранилище)
 	repo := repository.NewMemoryRepository()
 
@@ -20,9 +21,9 @@ func main() {
 	shorter := service.NewShorterService(repo)
 
 	// создаём HTTP-сервер и внедряем сервис
-	server := handler.NewHTTPServer(baseURL, shorter)
+	server := handler.NewHTTPServer(config.Param.BaseURL, shorter)
 
-	fmt.Printf("Server run on: %s\n", baseURL)
+	fmt.Printf("Server run on: %s\n", config.Param.BaseURL)
 	if err := http.ListenAndServe(":8080", server.Router()); err != nil {
 		log.Fatal(err)
 	}
