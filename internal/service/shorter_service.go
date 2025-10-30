@@ -11,6 +11,8 @@ import (
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 )
 
+var rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
+
 // ShorterService отвечает за бизнес-логику: валидацию, генерацию ID и сохранение ссылок.
 type ShorterService struct {
 	repo repository.Repository
@@ -45,7 +47,6 @@ func (svc *ShorterService) GetOriginalURL(shortID string) (string, bool) {
 
 // generateID — генерирует случайный shortID.
 func (svc *ShorterService) generateID() string {
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 	id := make([]byte, config.Param.LengthID)
 	for i := range id {
 		id[i] = config.Param.CharSet[rnd.Intn(len(config.Param.CharSet))]
