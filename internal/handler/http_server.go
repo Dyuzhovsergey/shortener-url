@@ -54,7 +54,6 @@ func (srv *HTTPServer) handlePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
-	w.Header().Set("Content-Length", "30")
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(shortURL))
 }

@@ -35,6 +35,13 @@ func TestHandlePost(t *testing.T) {
 
 	body, _ := io.ReadAll(res.Body)
 
+	id := strings.TrimPrefix(string(body), "http://localhost:8080/")
+	_, ok := srv.shorter.GetOriginalURL(id)
+
+	if !ok {
+		t.Errorf("ссылка %s не сохранена", id)
+	}
+
 	if res.StatusCode != http.StatusCreated {
 		t.Errorf("ожидался статус %d, получили %d", http.StatusCreated, res.StatusCode)
 	}
