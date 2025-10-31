@@ -1,4 +1,4 @@
-// Package service for business logic projecr
+// Package service for business logic project
 package service
 
 import (
