@@ -14,6 +14,7 @@ import (
 func main() {
 	// парсим флаги (-a и -b)
 	config.ParseFlags()
+
 	// создаём репозиторий (хранилище)
 	repo := repository.NewMemoryRepository()
 

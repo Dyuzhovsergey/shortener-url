@@ -1,9 +1,10 @@
-// Package service for bissnes logic projecr
+// Package service for business logic projecr
 package service
 
 import (
 	"errors"
 	"math/rand"
+	"net/url"
 	"strings"
 	"time"
 
@@ -26,7 +27,11 @@ func NewShorterService(repo repository.Repository) *ShorterService {
 // CreateShortURL — создаёт короткую ссылку и сохраняет её.
 func (svc *ShorterService) CreateShortURL(originalURL string, baseURL string) (string, error) {
 	originalURL = strings.TrimSpace(originalURL)
-	if originalURL == "" || !strings.HasPrefix(originalURL, "http") {
+	if originalURL == "" {
+		return "", errors.New("invalid URL format")
+	}
+	parsedURL, err := url.ParseRequestURI(originalURL)
+	if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
 		return "", errors.New("invalid URL format")
 	}
 
