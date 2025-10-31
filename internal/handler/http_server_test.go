@@ -7,15 +7,27 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Dyuzhovsergey/shortener-url/internal/config"
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 	"github.com/Dyuzhovsergey/shortener-url/internal/service"
 )
 
+// makeTestConfig — возвращает тестовую конфигурацию.
+func makeTestConfig() *config.ShortenerConfig {
+	return &config.ShortenerConfig{
+		CharSet:  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+		LengthID: 8,
+		BaseURL:  "http://localhost:8080",
+		RunAddr:  ":8080",
+	}
+}
+
 // Создаёт "тестовый сервер" с in-memory репозиторием
 func setupTestServer() *HTTPServer {
 	repo := repository.NewMemoryRepository()
-	svc := service.NewShorterService(repo)
-	return NewHTTPServer("http://localhost:8080", svc)
+	cfg := makeTestConfig()
+	svc := service.NewShorterService(repo, cfg)
+	return NewHTTPServer(cfg.BaseURL, svc)
 }
 
 // Тест на POST / — создание короткого URL
@@ -27,39 +39,40 @@ func TestHandlePost(t *testing.T) {
 	req.Header.Set("Content-Type", "text/plain")
 
 	rec := httptest.NewRecorder()
-
 	srv.Router().ServeHTTP(rec, req)
 
 	res := rec.Result()
 	defer res.Body.Close()
 
 	body, _ := io.ReadAll(res.Body)
-
-	id := strings.TrimPrefix(string(body), "http://localhost:8080/")
-	_, ok := srv.shorter.GetOriginalURL(id)
-
-	if !ok {
-		t.Errorf("ссылка %s не сохранена", id)
-	}
+	bodyStr := string(body)
 
 	if res.StatusCode != http.StatusCreated {
-		t.Errorf("ожидался статус %d, получили %d", http.StatusCreated, res.StatusCode)
+		t.Errorf("expected status %d, got %d", http.StatusCreated, res.StatusCode)
 	}
 	if res.Header.Get("Content-Type") != "text/plain" {
-		t.Errorf("ожидался заголовок 'text/plain', получили %s", res.Header.Get("Content-Type"))
+		t.Errorf("expected header Content-Type 'text/plain', got %s", res.Header.Get("Content-Type"))
 	}
-	if !strings.HasPrefix(string(body), "http://localhost:8080/") {
-		t.Errorf("ожидался короткий URL с префиксом http://localhost:8080/, получили %s", string(body))
+	if !strings.HasPrefix(bodyStr, "http://localhost:8080/") {
+		t.Errorf("expected short URL prefix http://localhost:8080/, got %s", bodyStr)
+	}
+
+	// Проверяем, что URL действительно сохранился
+	id := strings.TrimPrefix(bodyStr, "http://localhost:8080/")
+	_, ok := srv.shorter.GetOriginalURL(id)
+	if !ok {
+		t.Errorf("short URL with ID %s was not saved", id)
 	}
 }
 
-// Тест на GET /{id} — редирект на оригинальный URL
+// --- Тест на GET /{id} ---
+// Проверяет редирект на оригинальный URL
 func TestHandleGet(t *testing.T) {
 	repo := repository.NewMemoryRepository()
-	svc := service.NewShorterService(repo)
-	srv := NewHTTPServer("http://localhost:8080", svc)
+	cfg := makeTestConfig()
+	svc := service.NewShorterService(repo, cfg)
+	srv := NewHTTPServer(cfg.BaseURL, svc)
 
-	// добавляем тестовые данные в репозиторий
 	shortID := "test123"
 	original := "https://example.com"
 	repo.Save(shortID, original)
@@ -68,16 +81,14 @@ func TestHandleGet(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	srv.Router().ServeHTTP(rec, req)
-
 	res := rec.Result()
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusTemporaryRedirect {
-		t.Errorf("ожидался статус %d, получили %d", http.StatusTemporaryRedirect, res.StatusCode)
+		t.Errorf("expected status %d, got %d", http.StatusTemporaryRedirect, res.StatusCode)
 	}
-
 	location := res.Header.Get("Location")
 	if location != original {
-		t.Errorf("ожидался Location %s, получили %s", original, location)
+		t.Errorf("expected Location %s, got %s", original, location)
 	}
 }

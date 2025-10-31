@@ -13,19 +13,19 @@ import (
 
 func main() {
 	// парсим флаги (-a и -b)
-	config.ParseFlags()
+	cfg := config.Load()
 
 	// создаём репозиторий (хранилище)
 	repo := repository.NewMemoryRepository()
 
 	// создаём сервис и внедряем репозиторий
-	shorter := service.NewShorterService(repo)
+	shorter := service.NewShorterService(repo, cfg)
 
 	// создаём HTTP-сервер и внедряем сервис
-	server := handler.NewHTTPServer(config.Param.BaseURL, shorter)
+	server := handler.NewHTTPServer(cfg.BaseURL, shorter)
 
-	fmt.Printf("Server run on: http://%s\n", config.FlagRunAddr)
-	if err := http.ListenAndServe(config.FlagRunAddr, server.Router()); err != nil {
+	fmt.Printf("Server run on: http://%s\n", cfg.RunAddr)
+	if err := http.ListenAndServe(cfg.RunAddr, server.Router()); err != nil {
 		log.Fatal(err)
 	}
 }
