@@ -1,3 +1,4 @@
+// Package config for config program and flags
 package config
 
 import (
