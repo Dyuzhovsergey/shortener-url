@@ -11,45 +11,70 @@ import (
 )
 
 func main() {
-	endpoint := "http://localhost:8080/"
-	// контейнер данных для запроса
-	data := url.Values{}
-	// приглашение в консоли
-	fmt.Println("Введите длинный URL")
-	// открываем потоковое чтение из консоли
+	baseURL := "http://localhost:8080/"
+
 	reader := bufio.NewReader(os.Stdin)
-	// читаем строку из консоли
-	long, err := reader.ReadString('\n')
-	if err != nil {
-		panic(err)
+
+	for {
+		fmt.Println("\nВыберите действие:")
+		fmt.Println("1 — Отправить длинный URL (POST)")
+		fmt.Println("2 — Получить оригинальный URL (GET)")
+		fmt.Println("0 — Выход")
+		fmt.Print("Ваш выбор: ")
+
+		choice, _ := reader.ReadString('\n')
+		choice = strings.TrimSpace(choice)
+
+		switch choice {
+		case "1":
+			handlePost(baseURL, reader)
+		case "2":
+			handleGet(baseURL, reader)
+		case "0":
+			fmt.Println("Выход из программы.")
+			return
+		default:
+			fmt.Println("Неизвестная команда.")
+		}
 	}
-	long = strings.TrimSuffix(long, "\n")
-	// заполняем контейнер данными
-	data.Set("url", long)
-	// добавляем HTTP-клиент
-	client := &http.Client{}
-	// пишем запрос
-	// запрос методом POST должен, помимо заголовков, содержать тело
-	// тело должно быть источником потокового чтения io.Reader
-	request, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(data.Encode()))
+}
+
+func handlePost(baseURL string, reader *bufio.Reader) {
+	fmt.Print("Введите длинный URL: ")
+	longURL, _ := reader.ReadString('\n')
+	longURL = strings.TrimSpace(longURL)
+
+	data := url.Values{}
+	data.Set("url", longURL)
+
+	resp, err := http.PostForm(baseURL, data)
 	if err != nil {
-		panic(err)
+		fmt.Println("Ошибка при запросе:", err)
+		return
 	}
-	// в заголовках запроса указываем кодировку
-	request.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	// отправляем запрос и получаем ответ
-	response, err := client.Do(request)
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	fmt.Println("Ответ сервера:", string(body))
+}
+
+func handleGet(baseURL string, reader *bufio.Reader) {
+	fmt.Print("Введите короткий ID: ")
+	id, _ := reader.ReadString('\n')
+	id = strings.TrimSpace(id)
+
+	resp, err := http.Get(baseURL + id)
 	if err != nil {
-		panic(err)
+		fmt.Println("Ошибка при запросе:", err)
+		return
 	}
-	// выводим код ответа
-	fmt.Println("Статус-код ", response.Status)
-	defer response.Body.Close()
-	// читаем поток из тела ответа
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		panic(err)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Println("Сервер вернул:", resp.Status)
+		return
 	}
-	// и печатаем его
-	fmt.Println(string(body))
+
+	body, _ := io.ReadAll(resp.Body)
+	fmt.Println("Оригинальный URL:", string(body))
 }
