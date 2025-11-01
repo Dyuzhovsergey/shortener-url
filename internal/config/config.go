@@ -20,8 +20,9 @@ func Load() *ShortenerConfig {
 	defaultBaseURL := "http://localhost:8080"
 	defaultRunAddr := "localhost:8080"
 
-	baseURL := flag.String("b", defaultBaseURL, "base URL for short links")
 	runAddr := flag.String("a", defaultRunAddr, "server address, e.g. ':8080'")
+	baseURL := flag.String("b", defaultBaseURL, "base URL for short links")
+
 	flag.Parse()
 
 	cfg := &ShortenerConfig{
