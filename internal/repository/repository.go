@@ -1,4 +1,4 @@
-// Package repository for interface srorage short URL
+// Package repository for interface storage short URL
 package repository
 
 // Repository — интерфейс для хранилища сокращённых ссылок.

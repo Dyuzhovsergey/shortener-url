@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 )
@@ -44,10 +43,7 @@ func handlePost(baseURL string, reader *bufio.Reader) {
 	longURL, _ := reader.ReadString('\n')
 	longURL = strings.TrimSpace(longURL)
 
-	data := url.Values{}
-	data.Set("url", longURL)
-
-	resp, err := http.PostForm(baseURL, data)
+	resp, err := http.Post(baseURL, "text/plain", strings.NewReader(longURL))
 	if err != nil {
 		fmt.Println("Ошибка при запросе:", err)
 		return
@@ -55,7 +51,7 @@ func handlePost(baseURL string, reader *bufio.Reader) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	fmt.Println("Ответ сервера:", string(body))
+	fmt.Printf("Статус: %s\nОтвет сервера: %s\n", resp.Status, string(body))
 }
 
 func handleGet(baseURL string, reader *bufio.Reader) {
@@ -63,18 +59,27 @@ func handleGet(baseURL string, reader *bufio.Reader) {
 	id, _ := reader.ReadString('\n')
 	id = strings.TrimSpace(id)
 
-	resp, err := http.Get(baseURL + id)
+	client := &http.Client{
+		// Запрещаем следовать за редиректами
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	resp, err := client.Get(baseURL + id)
 	if err != nil {
 		fmt.Println("Ошибка при запросе:", err)
 		return
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		fmt.Println("Сервер вернул:", resp.Status)
+	if resp.StatusCode == http.StatusTemporaryRedirect ||
+		resp.StatusCode == http.StatusPermanentRedirect {
+		location := resp.Header.Get("Location")
+		fmt.Println("Оригинальный URL:", location)
 		return
 	}
 
 	body, _ := io.ReadAll(resp.Body)
-	fmt.Println("Оригинальный URL:", string(body))
+	fmt.Printf("Статус: %s\nОтвет: %s\n", resp.Status, string(body))
 }

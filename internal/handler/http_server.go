@@ -25,6 +25,7 @@ func NewHTTPServer(baseURL string, shorter *service.ShorterService) *HTTPServer 
 }
 
 // Router — возвращает готовый http.Handler (ServeMux)
+
 func (srv *HTTPServer) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Post("/", srv.handlePost)
