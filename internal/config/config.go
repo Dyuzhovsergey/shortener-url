@@ -32,7 +32,7 @@ func Load() *ShortenerConfig {
 		*flagRunAddr = envRunAddr
 	}
 
-	if envBaseURL := os.Getenv("SERVER_ADDRESS"); envBaseURL != "" {
+	if envBaseURL := os.Getenv("BASE_URL"); envBaseURL != "" {
 		*flagBaseURL = envBaseURL
 	}
 
