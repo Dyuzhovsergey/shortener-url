@@ -10,8 +10,8 @@ import (
 
 type responseWriter struct {
 	http.ResponseWriter
-	status int
-	size   int
+	status    int
+	sizeBytes int
 }
 
 func (w *responseWriter) WriteHeader(code int) {
@@ -23,9 +23,9 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 	if w.status == 0 {
 		w.status = http.StatusOK
 	}
-	size, err := w.ResponseWriter.Write(b)
-	w.size += size
-	return size, err
+	n, err := w.ResponseWriter.Write(b)
+	w.sizeBytes += n
+	return n, err
 }
 
 func ZapLogger(logger *zap.Logger) func(http.Handler) http.Handler {
@@ -35,11 +35,15 @@ func ZapLogger(logger *zap.Logger) func(http.Handler) http.Handler {
 			rw := &responseWriter{ResponseWriter: w}
 			next.ServeHTTP(rw, r)
 
+			if rw.status == 0 {
+				rw.status = http.StatusOK
+			}
+
 			logger.Info("http request",
 				zap.String("method", r.Method),
 				zap.String("uri", r.RequestURI),
 				zap.Int("status", rw.status),
-				zap.Int("size", rw.size),
+				zap.Int("size", rw.sizeBytes),
 				zap.Duration("duration", time.Since(start)),
 			)
 		})

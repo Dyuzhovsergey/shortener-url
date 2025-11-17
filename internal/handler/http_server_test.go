@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"go.uber.org/zap"
+
 	"github.com/Dyuzhovsergey/shortener-url/internal/config"
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 	"github.com/Dyuzhovsergey/shortener-url/internal/service"
@@ -27,7 +29,10 @@ func setupTestServer() *HTTPServer {
 	repo := repository.NewMemoryRepository()
 	cfg := makeTestConfig()
 	svc := service.NewShorterService(repo, cfg)
-	return NewHTTPServer(cfg.BaseURL, svc)
+
+	logger := zap.NewNop()
+
+	return NewHTTPServer(cfg.BaseURL, svc, logger)
 }
 
 // Тест на POST / — создание короткого URL
@@ -71,7 +76,10 @@ func TestHandleGet(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	cfg := makeTestConfig()
 	svc := service.NewShorterService(repo, cfg)
-	srv := NewHTTPServer(cfg.BaseURL, svc)
+
+	logger := zap.NewNop()
+
+	srv := NewHTTPServer(cfg.BaseURL, svc, logger)
 
 	shortID := "test123"
 	original := "https://example.com"

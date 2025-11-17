@@ -6,7 +6,9 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
 
+	"github.com/Dyuzhovsergey/shortener-url/internal/middleware"
 	"github.com/Dyuzhovsergey/shortener-url/internal/service"
 )
 
@@ -14,13 +16,15 @@ import (
 type HTTPServer struct {
 	baseURL string
 	shorter *service.ShorterService
+	logger  *zap.Logger
 }
 
 // NewHTTPServer — конструктор с внедрением зависимости (DI)
-func NewHTTPServer(baseURL string, shorter *service.ShorterService) *HTTPServer {
+func NewHTTPServer(baseURL string, shorter *service.ShorterService, logger *zap.Logger) *HTTPServer {
 	return &HTTPServer{
 		baseURL: baseURL,
 		shorter: shorter,
+		logger:  logger,
 	}
 }
 
@@ -28,6 +32,9 @@ func NewHTTPServer(baseURL string, shorter *service.ShorterService) *HTTPServer 
 
 func (srv *HTTPServer) Router() http.Handler {
 	r := chi.NewRouter()
+
+	r.Use(middleware.ZapLogger(srv.logger))
+
 	r.Post("/", srv.handlePost)
 	r.Get("/{id}", srv.handleGet)
 	return r
