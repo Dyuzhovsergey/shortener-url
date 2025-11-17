@@ -1,4 +1,4 @@
-// Package logger init zap-logger.
+// Package logger init zap.Logger
 package logger
 
 import (
@@ -7,7 +7,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// Init zap.Logger.
+// Init zap.Logger
 func Init() *zap.Logger {
 	logger, err := zap.NewDevelopment()
 	if err != nil {
