@@ -6,13 +6,17 @@ import (
 	"math/rand"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Dyuzhovsergey/shortener-url/internal/config"
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 )
 
-var rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
+var (
+	rnd   = rand.New(rand.NewSource(time.Now().UnixNano()))
+	rndMu sync.Mutex
+)
 
 // ShorterService отвечает за бизнес-логику: валидацию, генерацию ID и сохранение ссылок.
 type ShorterService struct {
@@ -54,6 +58,10 @@ func (svc *ShorterService) GetOriginalURL(shortID string) (string, bool) {
 // generateID — генерирует случайный shortID.
 func (svc *ShorterService) generateID() string {
 	id := make([]byte, svc.cfg.LengthID)
+
+	rndMu.Lock()
+	defer rndMu.Unlock()
+
 	for i := range id {
 		id[i] = svc.cfg.CharSet[rnd.Intn(len(svc.cfg.CharSet))]
 	}

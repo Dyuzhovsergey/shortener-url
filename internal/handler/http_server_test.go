@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/Dyuzhovsergey/shortener-url/internal/config"
+	"github.com/Dyuzhovsergey/shortener-url/internal/model"
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 	"github.com/Dyuzhovsergey/shortener-url/internal/service"
 )
@@ -98,5 +100,41 @@ func TestHandleGet(t *testing.T) {
 	location := res.Header.Get("Location")
 	if location != original {
 		t.Errorf("expected Location %s, got %s", original, location)
+	}
+}
+
+func TestHandleAPIPost_OK(t *testing.T) {
+	srv := setupTestServer()
+
+	body := `{"url":"https://practicum.yandex.ru/"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+
+	res := rec.Result()
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, res.StatusCode)
+	}
+
+	if ct := res.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Fatalf("expected Content-Type application/json, got %s", ct)
+	}
+
+	respBody, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("cannot read body: %v", err)
+	}
+
+	var resp model.ShortenResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		t.Fatalf("cannot unmarshal response: %v", err)
+	}
+
+	if !strings.HasPrefix(resp.Result, "http://localhost:8080/") {
+		t.Errorf("expected result prefix http://localhost:8080/, got %s", resp.Result)
 	}
 }
