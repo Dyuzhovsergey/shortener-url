@@ -79,7 +79,6 @@ func (srv *HTTPServer) handlePost(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/shorten
 func (srv *HTTPServer) handleAPIPost(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
 
 	var req model.ShortenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
