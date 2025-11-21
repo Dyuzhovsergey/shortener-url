@@ -6,15 +6,10 @@ import (
 	"math/rand"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/Dyuzhovsergey/shortener-url/internal/config"
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 )
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
 
 // ShorterService отвечает за бизнес-логику: валидацию, генерацию ID и сохранение ссылок.
 type ShorterService struct {
