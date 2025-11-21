@@ -35,9 +35,14 @@ func (svc *ShorterService) CreateShortURL(originalURL string, baseURL string) (s
 	if originalURL == "" {
 		return "", errors.New("invalid URL format")
 	}
+
 	parsedURL, err := url.ParseRequestURI(originalURL)
 	if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
 		return "", errors.New("invalid URL format")
+	}
+
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return "", errors.New("unsupported URL scheme")
 	}
 
 	shortID := svc.generateID()
