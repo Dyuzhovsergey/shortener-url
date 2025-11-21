@@ -61,7 +61,6 @@ func (svc *ShorterService) GetOriginalURL(shortID string) (string, bool) {
 // generateID — генерирует случайный shortID.
 func (svc *ShorterService) generateID() string {
 	id := make([]byte, svc.cfg.LengthID)
-
 	for i := range id {
 		id[i] = svc.cfg.CharSet[rand.Intn(len(svc.cfg.CharSet))]
 	}
