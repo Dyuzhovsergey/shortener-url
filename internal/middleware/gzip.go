@@ -24,7 +24,7 @@ func (c *compressWriter) Header() http.Header {
 }
 
 func (c *compressWriter) Write(p []byte) (int, error) {
-	return c.w.Write(p)
+	return c.zw.Write(p)
 }
 
 func (c *compressWriter) WriteHeader(statusCode int) {
@@ -63,7 +63,7 @@ func (c *compressReader) Close() error {
 	if err := c.zr.Close(); err != nil {
 		return err
 	}
-	return c.zr.Close()
+	return c.r.Close()
 }
 
 // GzipMiddleware — middleware для поддержки gzip и на запросах и ответах
@@ -83,6 +83,7 @@ func GzipMiddleware(next http.Handler) http.Handler {
 			cr, err := newCompressReader(r.Body)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
+				return
 			}
 			r.Body = cr
 			defer cr.Close()

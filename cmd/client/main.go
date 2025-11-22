@@ -43,42 +43,15 @@ func handlePost(baseURL string, reader *bufio.Reader) {
 	longURL, _ := reader.ReadString('\n')
 	longURL = strings.TrimSpace(longURL)
 
-	// Клиент без автоматического gzip — как curl без Accept-Encoding
-	client := &http.Client{
-		Transport: &http.Transport{
-			Proxy:              http.ProxyFromEnvironment,
-			DisableCompression: true,
-		},
-	}
-
-	req, err := http.NewRequest(http.MethodPost, baseURL, strings.NewReader(longURL))
-	if err != nil {
-		fmt.Println("Ошибка при создании запроса:", err)
-		return
-	}
-	req.Header.Set("Content-Type", "text/plain")
-
-	resp, err := client.Do(req)
+	resp, err := http.Post(baseURL, "text/plain", strings.NewReader(longURL))
 	if err != nil {
 		fmt.Println("Ошибка при запросе:", err)
 		return
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Println("Ошибка чтения ответа:", err)
-		return
-	}
-
-	fmt.Printf("Статус: %s\n", resp.Status)
-
-	if resp.StatusCode != http.StatusCreated {
-		fmt.Printf("Ответ сервера (ошибка): %s\n", string(body))
-		return
-	}
-
-	fmt.Printf("Короткий URL: %s\n", string(body))
+	body, _ := io.ReadAll(resp.Body)
+	fmt.Printf("Статус: %s\nОтвет сервера: %s\n", resp.Status, string(body))
 }
 
 func handleGet(baseURL string, reader *bufio.Reader) {
