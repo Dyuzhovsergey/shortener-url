@@ -31,8 +31,6 @@ func (c *compressWriter) WriteHeader(statusCode int) {
 	if statusCode < 300 {
 		h := c.w.Header()
 		h.Set("Content-Encoding", "gzip")
-		// длина после сжатия заранее неизвестна — убираем Content-Length, если вдруг был
-		h.Del("Content-Length")
 	}
 	c.w.WriteHeader(statusCode)
 }
