@@ -28,7 +28,6 @@ func (c *compressWriter) Write(p []byte) (int, error) {
 }
 
 func (c *compressWriter) WriteHeader(statusCode int) {
-	// Если всё ок (2xx), то включаем gzip и ставим заголовок
 	if statusCode < 300 {
 		h := c.w.Header()
 		h.Set("Content-Encoding", "gzip")
