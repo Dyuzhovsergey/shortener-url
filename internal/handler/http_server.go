@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/Dyuzhovsergey/shortener-url/internal/middleware"
+
 	"github.com/Dyuzhovsergey/shortener-url/internal/model"
 	"github.com/Dyuzhovsergey/shortener-url/internal/service"
 )
@@ -30,21 +31,12 @@ func NewHTTPServer(baseURL string, shorter *service.ShorterService, logger *zap.
 	}
 }
 
-// // структуры для JSON API
-// type shortenRequest struct {
-// 	URL string `json:"url"`
-// }
-
-// type shortenResponse struct {
-// 	Result string `json:"result"`
-// }
-
 // Router — возвращает готовый http.Handler (ServeMux)
-
 func (srv *HTTPServer) Router() http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.ZapLogger(srv.logger))
+	r.Use(middleware.GzipMiddleware)
 
 	r.Post("/", srv.handlePost)
 	r.Get("/{id}", srv.handleGet)
