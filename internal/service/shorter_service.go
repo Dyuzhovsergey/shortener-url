@@ -48,12 +48,12 @@ func (svc *ShorterService) CreateShortURL(originalURL string, baseURL string) (s
 	return shortURL, nil
 }
 
-// GetOriginalURL — возвращает оригинальный URL по shortID
+// GetOriginalURL — возвращает оригинальный URL по shortID.
 func (svc *ShorterService) GetOriginalURL(shortID string) (string, bool) {
 	return svc.repo.Get(strings.TrimSpace(shortID))
 }
 
-// generateID — генерирует случайный shortID.
+// generateID — генерирует случайный shortID
 func (svc *ShorterService) generateID() string {
 	id := make([]byte, svc.cfg.LengthID)
 	for i := range id {
