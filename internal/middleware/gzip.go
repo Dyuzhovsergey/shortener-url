@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// compressWriter реализует http.ResponseWriter и прозрачно сжимает ответ.
 type compressWriter struct {
 	w  http.ResponseWriter
 	zw *gzip.Writer
@@ -27,6 +28,7 @@ func (c *compressWriter) Write(p []byte) (int, error) {
 	return c.zw.Write(p)
 }
 
+// Close закрывает gzip.Writer и досылает данные из буфера.
 func (c *compressWriter) WriteHeader(statusCode int) {
 	if statusCode < 300 {
 		h := c.w.Header()
@@ -35,6 +37,7 @@ func (c *compressWriter) WriteHeader(statusCode int) {
 	c.w.WriteHeader(statusCode)
 }
 
+// compressReader реализует io.ReadCloser и прозрачно распаковывает gzip-данные запроса.
 func (c *compressWriter) Close() error {
 	return c.zw.Close()
 }
