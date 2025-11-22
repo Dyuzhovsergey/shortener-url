@@ -1,0 +1,32 @@
+package repository
+
+import "sync"
+
+// MemoryRepository — реализация Repository в оперативной памяти.
+type MemoryRepository struct {
+	data map[string]string
+	mu   sync.RWMutex
+}
+
+// NewMemoryRepository — конструктор.
+func NewMemoryRepository() *MemoryRepository {
+	return &MemoryRepository{
+		data: make(map[string]string),
+	}
+}
+
+// Save сохраняет оригинальный URL по shortID.
+func (repo *MemoryRepository) Save(shortID, originalURL string) error {
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	repo.data[shortID] = originalURL
+	return nil
+}
+
+// Get возвращает оригинальный URL по shortID.
+func (repo *MemoryRepository) Get(shortID string) (string, bool) {
+	repo.mu.RLock()
+	defer repo.mu.RUnlock()
+	url, ok := repo.data[shortID]
+	return url, ok
+}
