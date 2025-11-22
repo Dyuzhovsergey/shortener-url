@@ -24,7 +24,7 @@ func (c *compressWriter) Header() http.Header {
 }
 
 func (c *compressWriter) Write(p []byte) (int, error) {
-	return c.zw.Write(p)
+	return c.w.Write(p)
 }
 
 func (c *compressWriter) WriteHeader(statusCode int) {
@@ -35,12 +35,10 @@ func (c *compressWriter) WriteHeader(statusCode int) {
 	c.w.WriteHeader(statusCode)
 }
 
-// Close закрывает gzip.Writer и досылает данные из буфера.
 func (c *compressWriter) Close() error {
 	return c.zw.Close()
 }
 
-// compressReader реализует io.ReadCloser и прозрачно распаковывает gzip-данные запроса.
 type compressReader struct {
 	r  io.ReadCloser
 	zr *gzip.Reader
@@ -51,7 +49,6 @@ func newCompressReader(r io.ReadCloser) (*compressReader, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	return &compressReader{
 		r:  r,
 		zr: zr,
@@ -63,41 +60,33 @@ func (c *compressReader) Read(p []byte) (n int, err error) {
 }
 
 func (c *compressReader) Close() error {
-	if err := c.r.Close(); err != nil {
+	if err := c.zr.Close(); err != nil {
 		return err
 	}
 	return c.zr.Close()
 }
 
-// GzipMiddleware — middleware для поддержки gzip и на запросах, и на ответах.
+// GzipMiddleware — middleware для поддержки gzip и на запросах и ответах
 func GzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// по умолчанию пробрасываем оригинальный ResponseWriter
 		ow := w
-
-		// 1) Клиент умеет принимать gzip? → будем сжимать ответ.
 		acceptEncoding := r.Header.Get("Accept-Encoding")
-		supportsGzip := strings.Contains(acceptEncoding, "gzip")
-		if supportsGzip {
+		supportGzip := strings.Contains(acceptEncoding, "gzip")
+		if supportGzip {
 			cw := newCompressWriter(w)
 			ow = cw
 			defer cw.Close()
 		}
-
-		// 2) Клиент прислал сжатый запрос? → распакуем.
 		contentEncoding := r.Header.Get("Content-Encoding")
 		sendsGzip := strings.Contains(contentEncoding, "gzip")
 		if sendsGzip {
 			cr, err := newCompressReader(r.Body)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
-				return
 			}
 			r.Body = cr
 			defer cr.Close()
 		}
-
-		// 3) Передаём управление следующему обработчику в цепочке.
 		next.ServeHTTP(ow, r)
 	})
 }
