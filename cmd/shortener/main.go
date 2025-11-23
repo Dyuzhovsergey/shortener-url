@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/http"
 
+	"go.uber.org/zap"
+
 	"github.com/Dyuzhovsergey/shortener-url/internal/config"
 	"github.com/Dyuzhovsergey/shortener-url/internal/handler"
 	"github.com/Dyuzhovsergey/shortener-url/internal/logger"
@@ -20,8 +22,18 @@ func main() {
 	zapLogger := logger.Init()
 	defer zapLogger.Sync()
 
-	// создаём репозиторий (хранилище)
-	repo := repository.NewMemoryRepository()
+	var repo repository.Repository
+	if cfg.FileStoragePath != "" {
+		fileRepo, err := repository.NewFileRepository(cfg.FileStoragePath)
+		if err != nil {
+			log.Fatalf("cannot init file repository: %v", err)
+		}
+		repo = fileRepo
+		zapLogger.Info("using file repository", zap.String("path", cfg.FileStoragePath))
+	} else {
+		repo = repository.NewMemoryRepository()
+		zapLogger.Info("using in-memory repository")
+	}
 
 	// создаём сервис и внедряем репозиторий
 	shorter := service.NewShorterService(repo, cfg)
