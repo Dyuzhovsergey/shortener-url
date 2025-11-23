@@ -6,6 +6,8 @@ import (
 	"math/rand"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/Dyuzhovsergey/shortener-url/internal/config"
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
@@ -15,11 +17,17 @@ import (
 type ShorterService struct {
 	repo repository.Repository
 	cfg  *config.ShortenerConfig
+	rnd  *rand.Rand
+	mu   sync.Mutex
 }
 
 // NewShorterService - Конструктор с внедрением зависимости (DI)
 func NewShorterService(repo repository.Repository, cfg *config.ShortenerConfig) *ShorterService {
-	return &ShorterService{repo: repo, cfg: cfg}
+	return &ShorterService{
+		repo: repo,
+		cfg:  cfg,
+		rnd:  rand.New(rand.NewSource(time.Now().UnixNano())),
+	}
 }
 
 // CreateShortURL — создаёт короткую ссылку и сохраняет её.
@@ -55,10 +63,12 @@ func (svc *ShorterService) GetOriginalURL(shortID string) (string, bool) {
 
 // generateID — генерирует случайный shortID.
 func (svc *ShorterService) generateID() string {
-	id := make([]byte, svc.cfg.LengthID)
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
 
+	id := make([]byte, svc.cfg.LengthID)
 	for i := range id {
-		id[i] = svc.cfg.CharSet[rand.Intn(len(svc.cfg.CharSet))]
+		id[i] = svc.cfg.CharSet[svc.rnd.Intn(len(svc.cfg.CharSet))]
 	}
 	return string(id)
 }
