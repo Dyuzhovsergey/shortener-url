@@ -14,6 +14,8 @@ import (
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 )
 
+const maxAttempts = 10
+
 // ShorterService отвечает за бизнес-логику: валидацию, генерацию ID и сохранение ссылок.
 type ShorterService struct {
 	repo repository.Repository
@@ -47,7 +49,17 @@ func (svc *ShorterService) CreateShortURL(ctx context.Context, originalURL strin
 		return "", errors.New("unsupported URL scheme")
 	}
 
-	shortID := svc.generateID()
+	var shortID string
+	for i := 0; i < maxAttempts; i++ {
+		shortID = svc.generateID()
+		if _, exists := svc.repo.Get(ctx, shortID); !exists {
+			break
+		}
+	}
+
+	if _, exists := svc.repo.Get(ctx, shortID); exists {
+		return "", errors.New("failed to generate unique shortID")
+	}
 
 	if err := svc.repo.Save(ctx, shortID, originalURL); err != nil {
 		return "", err
