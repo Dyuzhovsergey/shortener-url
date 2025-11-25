@@ -10,7 +10,7 @@ import (
 )
 
 type urlRecord struct {
-	UUID        string `json:"uuid"`
+	RecordID    string `json:"record_id"`
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
 }
@@ -34,7 +34,6 @@ func NewFileRepository(path string) (*FileRepository, error) {
 	// открываем файл
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
-		// файла нет — это нормально, создадим позже
 		return fr, nil
 	}
 	if err != nil {
@@ -79,9 +78,9 @@ func (fr *FileRepository) Save(shortID, originalURL string) error {
 	fr.data[shortID] = originalURL
 
 	// добавляем новую запись с "uuid" = порядковый номер
-	uuid := strconv.Itoa(len(fr.records) + 1)
+	recordID := strconv.Itoa(len(fr.records) + 1)
 	rec := urlRecord{
-		UUID:        uuid,
+		RecordID:    recordID,
 		ShortURL:    shortID,
 		OriginalURL: originalURL,
 	}
