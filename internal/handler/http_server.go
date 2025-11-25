@@ -78,11 +78,6 @@ func (srv *HTTPServer) handleAPIPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.URL == "" {
-		http.Error(w, "empty url field", http.StatusBadRequest)
-		return
-	}
-
 	shortURL, err := srv.shorter.CreateShortURL(r.Context(), req.URL, srv.baseURL)
 	if err != nil {
 		http.Error(w, "invalid URL format", http.StatusBadRequest)
