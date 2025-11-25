@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -66,7 +67,7 @@ func TestHandlePost(t *testing.T) {
 
 	// Проверяем, что URL действительно сохранился
 	id := strings.TrimPrefix(bodyStr, "http://localhost:8080/")
-	_, ok := srv.shorter.GetOriginalURL(id)
+	_, ok := srv.shorter.GetOriginalURL(context.Background(), id)
 	if !ok {
 		t.Errorf("short URL with ID %s was not saved", id)
 	}
@@ -85,7 +86,7 @@ func TestHandleGet(t *testing.T) {
 
 	shortID := "test123"
 	original := "https://example.com"
-	repo.Save(shortID, original)
+	repo.Save(context.Background(), shortID, original)
 
 	req := httptest.NewRequest(http.MethodGet, "/"+shortID, nil)
 	rec := httptest.NewRecorder()

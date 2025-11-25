@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 
 	"github.com/Dyuzhovsergey/shortener-url/internal/config"
@@ -26,7 +27,7 @@ func TestCreateShortURL_Valid(t *testing.T) {
 	original := "https://practicum.yandex.ru/"
 	baseURL := cfg.BaseURL
 
-	shortURL, err := svc.CreateShortURL(original, baseURL)
+	shortURL, err := svc.CreateShortURL(context.Background(), original, baseURL)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -41,7 +42,8 @@ func TestCreateShortURL_Valid(t *testing.T) {
 
 	// Проверим, что ссылка сохранилась в репозитории
 	id := shortURL[len(baseURL)+1:] // +1 за '/'
-	got, ok := svc.GetOriginalURL(id)
+	got, ok := svc.GetOriginalURL(context.Background(), id)
+
 	if !ok {
 		t.Fatalf("shortID %s not found in repository", id)
 	}
@@ -65,7 +67,7 @@ func TestCreateShortURL_Invalid(t *testing.T) {
 	}
 
 	for _, input := range tests {
-		_, err := svc.CreateShortURL(input, cfg.BaseURL)
+		_, err := svc.CreateShortURL(context.Background(), input, cfg.BaseURL)
 		if err == nil {
 			t.Errorf("expected error for input %q, got nil", input)
 		}
@@ -86,7 +88,7 @@ func TestCreateShortURL_Uniqueness(t *testing.T) {
 	const n = 1000
 
 	for i := 0; i < n; i++ {
-		shortURL, err := svc.CreateShortURL(original, baseURL)
+		shortURL, err := svc.CreateShortURL(context.Background(), original, baseURL)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -108,11 +110,11 @@ func TestGetOriginalURL(t *testing.T) {
 	original := "https://go.dev"
 
 	// сохраняем напрямую в репозиторий
-	if err := repo.Save(shortID, original); err != nil {
+	if err := repo.Save(context.Background(), shortID, original); err != nil {
 		t.Fatalf("cannot save to repo: %v", err)
 	}
 
-	got, ok := svc.GetOriginalURL(shortID)
+	got, ok := svc.GetOriginalURL(context.Background(), shortID)
 	if !ok {
 		t.Fatalf("expected to find shortID %s", shortID)
 	}
@@ -121,7 +123,7 @@ func TestGetOriginalURL(t *testing.T) {
 	}
 
 	// неизвестный ID
-	if _, ok := svc.GetOriginalURL("unknownID"); ok {
+	if _, ok := svc.GetOriginalURL(context.Background(), "unknownID"); ok {
 		t.Errorf("expected false for unknownID")
 	}
 }

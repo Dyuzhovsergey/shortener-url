@@ -2,6 +2,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"math/rand"
 	"net/url"
@@ -31,7 +32,7 @@ func NewShorterService(repo repository.Repository, cfg *config.ShortenerConfig) 
 }
 
 // CreateShortURL — создаёт короткую ссылку и сохраняет её.
-func (svc *ShorterService) CreateShortURL(originalURL string, baseURL string) (string, error) {
+func (svc *ShorterService) CreateShortURL(ctx context.Context, originalURL string, baseURL string) (string, error) {
 	originalURL = strings.TrimSpace(originalURL)
 	if originalURL == "" {
 		return "", errors.New("invalid URL format")
@@ -48,7 +49,7 @@ func (svc *ShorterService) CreateShortURL(originalURL string, baseURL string) (s
 
 	shortID := svc.generateID()
 
-	if err := svc.repo.Save(shortID, originalURL); err != nil {
+	if err := svc.repo.Save(ctx, shortID, originalURL); err != nil {
 		return "", err
 	}
 
@@ -57,8 +58,8 @@ func (svc *ShorterService) CreateShortURL(originalURL string, baseURL string) (s
 }
 
 // GetOriginalURL — возвращает оригинальный URL по shortID
-func (svc *ShorterService) GetOriginalURL(shortID string) (string, bool) {
-	return svc.repo.Get(strings.TrimSpace(shortID))
+func (svc *ShorterService) GetOriginalURL(ctx context.Context, shortID string) (string, bool) {
+	return svc.repo.Get(ctx, strings.TrimSpace(shortID))
 }
 
 // generateID — генерирует случайный shortID.

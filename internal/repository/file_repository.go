@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -70,7 +71,7 @@ func NewFileRepository(path string) (*FileRepository, error) {
 }
 
 // Save сохраняет оригинальный URL по shortID и перезаписывает файл.
-func (fr *FileRepository) Save(shortID, originalURL string) error {
+func (fr *FileRepository) Save(ctx context.Context, shortID, originalURL string) error {
 	fr.mu.Lock()
 	defer fr.mu.Unlock()
 
@@ -103,7 +104,7 @@ func (fr *FileRepository) Save(shortID, originalURL string) error {
 }
 
 // Get возвращает оригинальный URL по shortID.
-func (fr *FileRepository) Get(shortID string) (string, bool) {
+func (fr *FileRepository) Get(ctx context.Context, shortID string) (string, bool) {
 	fr.mu.RLock()
 	defer fr.mu.RUnlock()
 	url, ok := fr.data[shortID]

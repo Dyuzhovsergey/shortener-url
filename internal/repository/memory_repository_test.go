@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"strconv"
 	"sync"
 	"testing"
@@ -13,11 +14,11 @@ func TestMemoryRepository_SaveAndGet(t *testing.T) {
 	shortID := "abc123"
 	original := "https://example.com"
 
-	if err := repo.Save(shortID, original); err != nil {
+	if err := repo.Save(context.Background(), shortID, original); err != nil {
 		t.Fatalf("unexpected error on Save: %v", err)
 	}
 
-	got, ok := repo.Get(shortID)
+	got, ok := repo.Get(context.Background(), shortID)
 	if !ok {
 		t.Fatalf("expected ok=true for existing key, got false")
 	}
@@ -30,7 +31,7 @@ func TestMemoryRepository_SaveAndGet(t *testing.T) {
 func TestMemoryRepository_GetNotFound(t *testing.T) {
 	repo := NewMemoryRepository()
 
-	_, ok := repo.Get("unknown")
+	_, ok := repo.Get(context.Background(), "unknown")
 	if ok {
 		t.Errorf("expected ok=false for unknown key, got true")
 	}
@@ -44,14 +45,14 @@ func TestMemoryRepository_Overwrite(t *testing.T) {
 	url1 := "https://example.com/1"
 	url2 := "https://example.com/2"
 
-	if err := repo.Save(shortID, url1); err != nil {
+	if err := repo.Save(context.Background(), shortID, url1); err != nil {
 		t.Fatalf("unexpected error on first Save: %v", err)
 	}
-	if err := repo.Save(shortID, url2); err != nil {
+	if err := repo.Save(context.Background(), shortID, url2); err != nil {
 		t.Fatalf("unexpected error on second Save: %v", err)
 	}
 
-	got, ok := repo.Get(shortID)
+	got, ok := repo.Get(context.Background(), shortID)
 	if !ok {
 		t.Fatalf("expected ok=true for existing key, got false")
 	}
@@ -76,7 +77,7 @@ func TestMemoryRepository_ConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < perGoroutine; i++ {
 				id := "id-" + strconv.Itoa(g*perGoroutine+i)
-				_ = repo.Save(id, "https://example.com/"+id)
+				_ = repo.Save(context.Background(), id, "https://example.com/"+id)
 			}
 		}(g)
 	}
@@ -87,7 +88,7 @@ func TestMemoryRepository_ConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < perGoroutine; i++ {
 				id := "id-" + strconv.Itoa(g*perGoroutine+i)
-				_, _ = repo.Get(id)
+				_, _ = repo.Get(context.Background(), id)
 			}
 		}(g)
 	}

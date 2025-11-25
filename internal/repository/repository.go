@@ -1,8 +1,10 @@
 // Package repository for interface storage short URL
 package repository
 
+import "context"
+
 // Repository — интерфейс для хранилища сокращённых ссылок.
 type Repository interface {
-	Save(shortID, originalURL string) error
-	Get(shortID string) (string, bool)
+	Save(ctx context.Context, shortID, originalURL string) error
+	Get(ctx context.Context, shortID string) (string, bool)
 }

@@ -58,7 +58,7 @@ func (srv *HTTPServer) handlePost(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	shortURL, err := srv.shorter.CreateShortURL(string(body), srv.baseURL)
+	shortURL, err := srv.shorter.CreateShortURL(r.Context(), string(body), srv.baseURL)
 	if err != nil {
 		http.Error(w, "Invalid URL format", http.StatusBadRequest)
 		return
@@ -83,7 +83,7 @@ func (srv *HTTPServer) handleAPIPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortURL, err := srv.shorter.CreateShortURL(req.URL, srv.baseURL)
+	shortURL, err := srv.shorter.CreateShortURL(r.Context(), req.URL, srv.baseURL)
 	if err != nil {
 		http.Error(w, "invalid URL format", http.StatusBadRequest)
 		return
@@ -105,7 +105,7 @@ func (srv *HTTPServer) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	originalURL, ok := srv.shorter.GetOriginalURL(id)
+	originalURL, ok := srv.shorter.GetOriginalURL(r.Context(), id)
 	if !ok {
 		http.Error(w, "URL not found", http.StatusBadRequest)
 		return

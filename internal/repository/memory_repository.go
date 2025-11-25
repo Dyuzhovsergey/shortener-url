@@ -1,6 +1,9 @@
 package repository
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 // MemoryRepository — реализация Repository в оперативной памяти.
 type MemoryRepository struct {
@@ -16,7 +19,7 @@ func NewMemoryRepository() *MemoryRepository {
 }
 
 // Save сохраняет оригинальный URL по shortID.
-func (repo *MemoryRepository) Save(shortID, originalURL string) error {
+func (repo *MemoryRepository) Save(ctx context.Context, shortID, originalURL string) error {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 	repo.data[shortID] = originalURL
@@ -24,7 +27,7 @@ func (repo *MemoryRepository) Save(shortID, originalURL string) error {
 }
 
 // Get возвращает оригинальный URL по shortID.
-func (repo *MemoryRepository) Get(shortID string) (string, bool) {
+func (repo *MemoryRepository) Get(ctx context.Context, shortID string) (string, bool) {
 	repo.mu.RLock()
 	defer repo.mu.RUnlock()
 	url, ok := repo.data[shortID]
