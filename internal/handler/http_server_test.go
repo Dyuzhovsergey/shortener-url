@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,14 @@ import (
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 	"github.com/Dyuzhovsergey/shortener-url/internal/service"
 )
+
+type fakeDB struct {
+	err error
+}
+
+func (f *fakeDB) PingContext(ctx context.Context) error {
+	return f.err
+}
 
 // makeTestConfig — возвращает тестовую конфигурацию.
 func makeTestConfig() *config.ShortenerConfig {
@@ -35,7 +44,9 @@ func setupTestServer() *HTTPServer {
 
 	logger := zap.NewNop()
 
-	return NewHTTPServer(cfg.BaseURL, svc, logger)
+	db := &fakeDB{err: nil}
+
+	return NewHTTPServer(cfg.BaseURL, svc, logger, db)
 }
 
 // Тест на POST / — создание короткого URL
@@ -82,7 +93,9 @@ func TestHandleGet(t *testing.T) {
 
 	logger := zap.NewNop()
 
-	srv := NewHTTPServer(cfg.BaseURL, svc, logger)
+	db := &fakeDB{err: nil}
+
+	srv := NewHTTPServer(cfg.BaseURL, svc, logger, db)
 
 	shortID := "test123"
 	original := "https://example.com"
@@ -137,5 +150,46 @@ func TestHandleAPIPost_OK(t *testing.T) {
 
 	if !strings.HasPrefix(resp.Result, "http://localhost:8080/") {
 		t.Errorf("expected result prefix http://localhost:8080/, got %s", resp.Result)
+	}
+}
+
+// --- Тест OK на GET /ping ---
+func TestHandlePing_OK(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	cfg := makeTestConfig()
+	svc := service.NewShorterService(repo, cfg)
+
+	logger := zap.NewNop()
+	db := &fakeDB{err: nil}
+
+	srv := NewHTTPServer(cfg.BaseURL, svc, logger, db)
+
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	rec := httptest.NewRecorder()
+
+	srv.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+}
+
+func TestHandlePing_DBError(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	cfg := makeTestConfig()
+	svc := service.NewShorterService(repo, cfg)
+
+	logger := zap.NewNop()
+	db := &fakeDB{err: errors.New("db down")}
+
+	srv := NewHTTPServer(cfg.BaseURL, svc, logger, db)
+
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	rec := httptest.NewRecorder()
+
+	srv.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d", rec.Code)
 	}
 }
