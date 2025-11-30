@@ -13,6 +13,7 @@ type ShortenerConfig struct {
 	BaseURL         string
 	RunAddr         string
 	FileStoragePath string
+	DatabaseDSN     string
 }
 
 func Load() *ShortenerConfig {
@@ -28,6 +29,7 @@ func Load() *ShortenerConfig {
 	flagRunAddr := flag.String("a", defaultRunAddr, "server address, e.g. ':8080'")
 	flagBaseURL := flag.String("b", defaultBaseURL, "base URL for short links")
 	flagFilePath := flag.String("f", defaultFileStorePath, "file path for URL storage")
+	flagDBDSN := flag.String("d", "", "PostgreSQL DSN")
 
 	flag.Parse()
 
@@ -43,6 +45,10 @@ func Load() *ShortenerConfig {
 		*flagFilePath = envFilePath
 	}
 
+	if envDSN := os.Getenv("DATABASE_DSN"); envDSN != "" {
+		*flagDBDSN = envDSN
+	}
+
 	baseURL := strings.TrimRight(*flagBaseURL, "/")
 
 	cfg := &ShortenerConfig{
@@ -51,6 +57,7 @@ func Load() *ShortenerConfig {
 		BaseURL:         baseURL,
 		RunAddr:         *flagRunAddr,
 		FileStoragePath: *flagFilePath,
+		DatabaseDSN:     *flagDBDSN,
 	}
 	return cfg
 }
