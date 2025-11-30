@@ -2,6 +2,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -15,19 +16,25 @@ import (
 	"github.com/Dyuzhovsergey/shortener-url/internal/service"
 )
 
+type DBPinger interface {
+	PingContext(ctx context.Context) error
+}
+
 // HTTPServer — слой HTTP, знает про сервис, но не про репозиторий.
 type HTTPServer struct {
 	baseURL string
 	shorter *service.ShorterService
 	logger  *zap.Logger
+	db      DBPinger
 }
 
 // NewHTTPServer — конструктор с внедрением зависимости (DI)
-func NewHTTPServer(baseURL string, shorter *service.ShorterService, logger *zap.Logger) *HTTPServer {
+func NewHTTPServer(baseURL string, shorter *service.ShorterService, logger *zap.Logger, db DBPinger) *HTTPServer {
 	return &HTTPServer{
 		baseURL: baseURL,
 		shorter: shorter,
 		logger:  logger,
+		db:      db,
 	}
 }
 
@@ -41,6 +48,7 @@ func (srv *HTTPServer) Router() http.Handler {
 	r.Post("/", srv.handlePost)
 	r.Get("/{id}", srv.handleGet)
 	r.Post("/api/shorten", srv.handleAPIPost)
+	r.Get("/ping", srv.handlePing)
 	return r
 }
 
@@ -69,6 +77,24 @@ func (srv *HTTPServer) handlePost(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(shortURL))
 }
 
+// GET /{id}
+func (srv *HTTPServer) handleGet(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		http.Error(w, "Bad GET request", http.StatusBadRequest)
+		return
+	}
+
+	originalURL, ok := srv.shorter.GetOriginalURL(r.Context(), id)
+	if !ok {
+		http.Error(w, "URL not found", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Location", originalURL)
+	w.WriteHeader(http.StatusTemporaryRedirect)
+}
+
 // POST /api/shorten
 func (srv *HTTPServer) handleAPIPost(w http.ResponseWriter, r *http.Request) {
 
@@ -92,20 +118,18 @@ func (srv *HTTPServer) handleAPIPost(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// GET /{id}
-func (srv *HTTPServer) handleGet(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if id == "" {
-		http.Error(w, "Bad GET request", http.StatusBadRequest)
+func (srv *HTTPServer) handlePing(w http.ResponseWriter, r *http.Request) {
+	if srv.db == nil {
+		// БД не настроена — считаем это 500
+		http.Error(w, "database not configured", http.StatusInternalServerError)
 		return
 	}
 
-	originalURL, ok := srv.shorter.GetOriginalURL(r.Context(), id)
-	if !ok {
-		http.Error(w, "URL not found", http.StatusBadRequest)
+	if err := srv.db.PingContext(r.Context()); err != nil {
+		srv.logger.Error("database ping failed", zap.Error(err))
+		http.Error(w, "database is not available", http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Location", originalURL)
-	w.WriteHeader(http.StatusTemporaryRedirect)
+	w.WriteHeader(http.StatusOK)
 }
