@@ -15,16 +15,32 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
-// Save сохраняет оригинальный URL по shortID.
 func (r *PostgresRepository) Save(ctx context.Context, shortID, originalURL string) error {
-	const query = `
-		INSERT INTO short_urls (short_id, original_url)
-		VALUES ($1, $2)
-		ON CONFLICT (short_id) DO UPDATE
-		SET original_url = EXCLUDED.original_url;
-	`
+	var exists bool
 
-	_, err := r.db.ExecContext(ctx, query, shortID, originalURL)
+	row := r.db.QueryRowContext(
+		ctx,
+		"SELECT EXISTS(SELECT 1 FROM short_urls WHERE short_id = $1)",
+		shortID,
+	)
+
+	err := row.Scan(&exists)
+	if err != nil {
+		return err
+	}
+
+	if exists {
+		_, err := r.db.ExecContext(ctx,
+			"UPDATE short_urls SET original_url = $1 WHERE short_id = $2",
+			originalURL, shortID,
+		)
+		return err
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		"INSERT INTO short_urls (short_id, original_url) VALUES ($1, $2)",
+		shortID, originalURL,
+	)
 	return err
 }
 
@@ -42,7 +58,7 @@ func (r *PostgresRepository) Get(ctx context.Context, shortID string) (string, b
 		return "", false
 	}
 	if err != nil {
-		// тут можно залогировать ошибку, но интерфейс всё равно bool возвращает
+
 		return "", false
 	}
 	return original, true
