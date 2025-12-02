@@ -3,6 +3,7 @@ module github.com/Dyuzhovsergey/shortener-url
 go 1.24.10
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/go-chi/chi/v5 v5.2.3
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/stretchr/testify v1.8.1
