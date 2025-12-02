@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/Dyuzhovsergey/shortener-url/internal/logger"
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 	"github.com/Dyuzhovsergey/shortener-url/internal/service"
+	"github.com/Dyuzhovsergey/shortener-url/migrations"
 )
 
 func main() {
@@ -23,9 +25,24 @@ func main() {
 	zapLogger := logger.Init()
 	defer zapLogger.Sync()
 
-	var repo repository.Repository
+	var (
+		repo repository.Repository
+		db   *sql.DB
+		err  error
+	)
 
-	if cfg.FileStoragePath != "" {
+	if cfg.DatabaseDSN != "" {
+		db, err = sql.Open("pgx", cfg.DatabaseDSN)
+		if err != nil {
+			zapLogger.Fatal("failed to open DB", zap.Error(err))
+		}
+		if err := migrations.Run(context.Background(), db); err != nil {
+			zapLogger.Fatal("failed to run migrations", zap.Error(err))
+		}
+		repo = repository.NewPostgresRepository(db)
+		zapLogger.Info("using postgres repository", zap.String("dsn", cfg.DatabaseDSN))
+
+	} else if cfg.FileStoragePath != "" {
 		fileRepo, err := repository.NewFileRepository(cfg.FileStoragePath)
 		if err != nil {
 			zapLogger.Fatal("cannot init file repository: %v", zap.Error(err))
@@ -35,19 +52,6 @@ func main() {
 	} else {
 		repo = repository.NewMemoryRepository()
 		zapLogger.Info("using in-memory repository")
-
-	}
-
-	var (
-		db  *sql.DB
-		err error
-	)
-
-	if cfg.DatabaseDSN != "" {
-		db, err = sql.Open("pgx", cfg.DatabaseDSN)
-		if err != nil {
-			zapLogger.Fatal("failed to open DB", zap.Error(err))
-		}
 	}
 
 	// создаём сервис и внедряем репозиторий
