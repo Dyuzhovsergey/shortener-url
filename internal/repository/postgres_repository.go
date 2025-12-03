@@ -35,8 +35,10 @@ func (r *PostgresRepository) Get(ctx context.Context, shortID string) (string, b
 		FROM short_urls
 		WHERE short_id = $1;
 	`
-	var original string
-	err := r.db.QueryRowContext(ctx, query, shortID).Scan(&original)
+	var originalURL string
+	rows := r.db.QueryRowContext(ctx, query, shortID)
+
+	err := rows.Scan(&originalURL)
 	if err == sql.ErrNoRows {
 		return "", false
 	}
@@ -44,5 +46,6 @@ func (r *PostgresRepository) Get(ctx context.Context, shortID string) (string, b
 
 		return "", false
 	}
-	return original, true
+
+	return originalURL, true
 }
