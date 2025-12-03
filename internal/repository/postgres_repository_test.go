@@ -8,7 +8,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
-func TestPostgresRepository_Save_InsertWhenNotExists(t *testing.T) {
+func TestPostgresRepository_Save_OK(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("cannot create sqlmock: %v", err)
@@ -20,50 +20,9 @@ func TestPostgresRepository_Save_InsertWhenNotExists(t *testing.T) {
 	shortID := "abc123"
 	original := "https://example.com"
 
-	// 1) Ожидаем, что Save сначала выполнит SELECT EXISTS(...)
-	mock.ExpectQuery(`SELECT EXISTS\(SELECT 1 FROM short_urls WHERE short_id = \$1\)`).
-		WithArgs(shortID).
-		WillReturnRows(
-			sqlmock.NewRows([]string{"exists"}).AddRow(false), // записи нет
-		)
-
-	// 2) Потом ожидаем INSERT
+	// ожидаем, что при Save будет вызван INSERT ... ON CONFLICT
 	mock.ExpectExec(`INSERT INTO short_urls`).
 		WithArgs(shortID, original).
-		WillReturnResult(sqlmock.NewResult(1, 1))
-
-	err = repo.Save(context.Background(), shortID, original)
-	if err != nil {
-		t.Fatalf("unexpected error from Save: %v", err)
-	}
-
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("unfulfilled expectations: %v", err)
-	}
-}
-
-func TestPostgresRepository_Save_UpdateWhenExists(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("cannot create sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	repo := NewPostgresRepository(db)
-
-	shortID := "abc123"
-	original := "https://example.com/updated"
-
-	// 1) SELECT EXISTS(...) -> true
-	mock.ExpectQuery(`SELECT EXISTS\(SELECT 1 FROM short_urls WHERE short_id = \$1\)`).
-		WithArgs(shortID).
-		WillReturnRows(
-			sqlmock.NewRows([]string{"exists"}).AddRow(true),
-		)
-
-	// 2) UPDATE
-	mock.ExpectExec(`UPDATE short_urls SET original_url = \$1 WHERE short_id = \$2`).
-		WithArgs(original, shortID).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err = repo.Save(context.Background(), shortID, original)
