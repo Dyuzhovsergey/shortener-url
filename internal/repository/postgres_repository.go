@@ -15,6 +15,7 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
+// Save сохраняет оригинальный URL по shortID.
 func (r *PostgresRepository) Save(ctx context.Context, shortID, originalURL string) error {
 	var exists bool
 
