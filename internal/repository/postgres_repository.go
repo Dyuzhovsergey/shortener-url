@@ -46,6 +46,5 @@ func (r *PostgresRepository) Get(ctx context.Context, shortID string) (string, b
 
 		return "", false
 	}
-
 	return originalURL, true
 }

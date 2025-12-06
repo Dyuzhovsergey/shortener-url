@@ -9,3 +9,15 @@ type ShortenRequest struct {
 type ShortenResponse struct {
 	Result string `json:"result"`
 }
+
+// BatchShortenRequestItem — элемент батч-запроса.
+type BatchShortenRequestItem struct {
+	CorrelationID string `json:"correlation_id"`
+	OriginalURL   string `json:"original_url"`
+}
+
+// BatchShortenResponseItem — элемент батч-ответа.
+type BatchShortenResponseItem struct {
+	CorrelationID string `json:"correlation_id"`
+	ShortURL      string `json:"short_url"`
+}
