@@ -33,6 +33,19 @@ func NewShorterService(repo repository.Repository, cfg *config.ShortenerConfig) 
 	}
 }
 
+// BatchItem — один элемент батч-запроса для сервиса.
+type BatchItem struct {
+	CorrelationID string
+	OriginalURL   string
+}
+
+// BatchResult — результат обработки одного элемента батча.
+type BatchResult struct {
+	CorrelationID string
+	ShortID       string
+	ShortURL      string
+}
+
 // CreateShortURL — создаёт короткую ссылку и сохраняет её.
 func (svc *ShorterService) CreateShortURL(ctx context.Context, originalURL string, baseURL string) (string, error) {
 	originalURL = strings.TrimSpace(originalURL)
@@ -84,4 +97,34 @@ func (svc *ShorterService) generateID() string {
 		id[i] = svc.cfg.CharSet[svc.rnd.Intn(len(svc.cfg.CharSet))]
 	}
 	return string(id)
+}
+
+// CreateShortURLBatch — обрабатывает батч URL'ов.
+// На каждый originalURL создаёт shortID, сохраняет через repo и возвращает список результатов.
+func (svc *ShorterService) CreateShortURLBatch(ctx context.Context, baseURL string, items []BatchItem) ([]BatchResult, error) {
+	if len(items) == 0 {
+		return nil, errors.New("empty batch")
+	}
+
+	results := make([]BatchResult, 0, len(items))
+
+	for _, it := range items {
+		// используем уже существующую логику CreateShortURL:
+		shortURL, err := svc.CreateShortURL(ctx, it.OriginalURL, baseURL)
+		if err != nil {
+			// самый простой вариант: если хотя бы один URL невалиден — падаем на весь батч
+			return nil, err
+		}
+
+		// извлекаем shortID из shortURL: baseURL + "/" + shortID
+		shortID := shortURL[len(baseURL)+1:]
+
+		results = append(results, BatchResult{
+			CorrelationID: it.CorrelationID,
+			ShortID:       shortID,
+			ShortURL:      shortURL,
+		})
+	}
+
+	return results, nil
 }
