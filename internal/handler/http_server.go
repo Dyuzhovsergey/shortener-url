@@ -49,6 +49,7 @@ func (srv *HTTPServer) Router() http.Handler {
 	r.Get("/{id}", srv.handleGet)
 	r.Post("/api/shorten", srv.handleAPIPost)
 	r.Get("/ping", srv.handlePing)
+	r.Post("/api/shorten/batch", srv.handleAPIPostBatch)
 	return r
 }
 
@@ -132,4 +133,52 @@ func (srv *HTTPServer) handlePing(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// POST /api/shorten/batch
+func (srv *HTTPServer) handleAPIPostBatch(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	var req []model.BatchShortenRequestItem
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if len(req) == 0 {
+		http.Error(w, "empty batch", http.StatusBadRequest)
+		return
+	}
+
+	// готовим данные для сервиса
+	items := make([]service.BatchItem, 0, len(req))
+	for _, it := range req {
+		items = append(items, service.BatchItem{
+			CorrelationID: it.CorrelationID,
+			OriginalURL:   it.OriginalURL,
+		})
+	}
+
+	results, err := srv.shorter.CreateShortURLBatch(r.Context(), srv.baseURL, items)
+	if err != nil {
+		http.Error(w, "invalid URL in batch", http.StatusBadRequest)
+		return
+	}
+
+	// формируем ответ для клиента
+	resp := make([]model.BatchShortenResponseItem, 0, len(results))
+	for _, res := range results {
+		resp = append(resp, model.BatchShortenResponseItem{
+			CorrelationID: res.CorrelationID,
+			ShortURL:      res.ShortURL,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		srv.logger.Error("failed to write JSON batch response", zap.Error(err))
+	}
 }
