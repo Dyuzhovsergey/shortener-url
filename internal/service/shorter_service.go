@@ -42,7 +42,6 @@ type BatchItem struct {
 // BatchResult — результат обработки одного элемента батча.
 type BatchResult struct {
 	CorrelationID string
-	ShortID       string
 	ShortURL      string
 }
 
@@ -116,12 +115,8 @@ func (svc *ShorterService) CreateShortURLBatch(ctx context.Context, baseURL stri
 			return nil, err
 		}
 
-		// извлекаем shortID из shortURL: baseURL + "/" + shortID
-		shortID := shortURL[len(baseURL)+1:]
-
 		results = append(results, BatchResult{
 			CorrelationID: it.CorrelationID,
-			ShortID:       shortID,
 			ShortURL:      shortURL,
 		})
 	}
