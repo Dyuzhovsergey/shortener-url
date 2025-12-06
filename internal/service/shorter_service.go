@@ -111,7 +111,6 @@ func (svc *ShorterService) CreateShortURLBatch(ctx context.Context, baseURL stri
 		// используем уже существующую логику CreateShortURL:
 		shortURL, err := svc.CreateShortURL(ctx, it.OriginalURL, baseURL)
 		if err != nil {
-			// самый простой вариант: если хотя бы один URL невалиден — падаем на весь батч
 			return nil, err
 		}
 
