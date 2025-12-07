@@ -4,7 +4,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 
@@ -46,44 +45,12 @@ func (srv *HTTPServer) Router() http.Handler {
 	r.Use(middleware.ZapLogger(srv.logger))
 	r.Use(middleware.GzipMiddleware)
 
-	r.Post("/", srv.handlePost)
 	r.Get("/{id}", srv.handleGet)
+	r.Post("/", srv.handlePost)
 	r.Post("/api/shorten", srv.handleAPIPost)
 	r.Get("/ping", srv.handlePing)
 	r.Post("/api/shorten/batch", srv.handleAPIPostBatch)
 	return r
-}
-
-// POST /
-func (srv *HTTPServer) handlePost(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.Error(w, "Bad POST request", http.StatusBadRequest)
-		return
-	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil || len(body) == 0 {
-		http.Error(w, "Error reading body", http.StatusBadRequest)
-		return
-	}
-	defer r.Body.Close()
-
-	shortURL, err := srv.shorter.CreateShortURL(r.Context(), string(body), srv.baseURL)
-	if err != nil {
-		if errors.Is(err, service.ErrAlreadyExists) {
-			w.Header().Set("Content-Type", "text/plain")
-			w.WriteHeader(http.StatusConflict) // 409
-			_, _ = w.Write([]byte(shortURL))   // уже существующий короткий URL
-			return
-		}
-
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/plain")
-	w.WriteHeader(http.StatusCreated)
-	_, _ = w.Write([]byte(shortURL))
 }
 
 // GET /{id}
@@ -104,6 +71,40 @@ func (srv *HTTPServer) handleGet(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusTemporaryRedirect)
 }
 
+// POST /
+func (srv *HTTPServer) handlePost(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.Error(w, "Bad POST request", http.StatusBadRequest)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil || len(body) == 0 {
+		http.Error(w, "Error reading body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	shortURL, err := srv.shorter.CreateShortURL(r.Context(), string(body), srv.baseURL)
+	if err != nil {
+		// 🔹 Если нам вернули непустой shortURL и ошибку — это как раз кейс "URL уже существовал".
+		if shortURL != "" {
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusConflict) // 409
+			_, _ = w.Write([]byte(shortURL))   // уже существующий короткий URL
+			return
+		}
+
+		// остальные ошибки — некорректный URL
+		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusCreated)
+	_, _ = w.Write([]byte(shortURL))
+}
+
 // POST /api/shorten
 func (srv *HTTPServer) handleAPIPost(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
@@ -121,7 +122,8 @@ func (srv *HTTPServer) handleAPIPost(w http.ResponseWriter, r *http.Request) {
 
 	shortURL, err := srv.shorter.CreateShortURL(r.Context(), req.URL, srv.baseURL)
 	if err != nil {
-		if errors.Is(err, service.ErrAlreadyExists) {
+		// 🔹 Конфликт: shortURL не пустой + ошибка → URL уже есть в базе
+		if shortURL != "" {
 			resp := model.ShortenResponse{Result: shortURL}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict) // 409
