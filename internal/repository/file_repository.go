@@ -75,6 +75,12 @@ func (fr *FileRepository) Save(ctx context.Context, shortID, originalURL string)
 	fr.mu.Lock()
 	defer fr.mu.Unlock()
 
+	for sid, url := range fr.data {
+		if url == originalURL {
+			return &ErrOriginalAlreadyExists{ShortID: sid}
+		}
+	}
+
 	// если уже есть такая запись — просто обновим мапу и файл
 	fr.data[shortID] = originalURL
 

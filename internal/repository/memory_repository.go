@@ -25,7 +25,6 @@ func (repo *MemoryRepository) Save(ctx context.Context, shortID, originalURL str
 
 	for sid, url := range repo.data {
 		if url == originalURL {
-			// URL уже есть, возвращаем специальную ошибку с существующим shortID
 			return &ErrOriginalAlreadyExists{ShortID: sid}
 		}
 	}
