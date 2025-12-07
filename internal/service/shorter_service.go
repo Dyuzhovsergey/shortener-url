@@ -16,6 +16,8 @@ import (
 
 const maxAttempts = 10
 
+var ErrAlreadyExists = errors.New("URL already exists")
+
 // ShorterService отвечает за бизнес-логику: валидацию, генерацию ID и сохранение ссылок.
 type ShorterService struct {
 	repo repository.Repository
@@ -74,6 +76,12 @@ func (svc *ShorterService) CreateShortURL(ctx context.Context, originalURL strin
 	}
 
 	if err := svc.repo.Save(ctx, shortID, originalURL); err != nil {
+		var dup *repository.ErrOriginalAlreadyExists
+		if errors.As(err, &dup) {
+			// такой URL уже есть, строим короткий URL из существующего shortID
+			existingShortURL := baseURL + "/" + dup.ShortID
+			return existingShortURL, ErrAlreadyExists
+		}
 		return "", err
 	}
 
