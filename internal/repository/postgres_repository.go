@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 )
 
 // PostgresRepository — реализация Repository в PostgreSQL.
@@ -16,7 +17,6 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 }
 
 // Save сохраняет оригинальный URL по shortID.
-// Save сохраняет оригинальный URL по shortID.
 func (r *PostgresRepository) Save(ctx context.Context, shortID, originalURL string) error {
 	// 1. Проверяем, есть ли уже такой original_url
 	const selectQuery = `
@@ -27,12 +27,17 @@ func (r *PostgresRepository) Save(ctx context.Context, shortID, originalURL stri
     `
 	var existingShortID string
 	err := r.db.QueryRowContext(ctx, selectQuery, originalURL).Scan(&existingShortID)
-	if err == nil {
-		// Запись с таким original_url уже есть
+
+	switch {
+	case err == nil:
+		// Такой original_url уже есть
 		return &ErrOriginalAlreadyExists{ShortID: existingShortID}
-	}
-	if err != nil && err != sql.ErrNoRows {
-		// Какая-то ошибка БД
+
+	case errors.Is(err, sql.ErrNoRows):
+		// Всё ок, такой записи нет — идём делать INSERT
+
+	default:
+		// Любая другая ошибка БД
 		return err
 	}
 
