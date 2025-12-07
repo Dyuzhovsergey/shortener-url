@@ -22,6 +22,14 @@ func NewMemoryRepository() *MemoryRepository {
 func (repo *MemoryRepository) Save(ctx context.Context, shortID, originalURL string) error {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
+
+	for sid, url := range repo.data {
+		if url == originalURL {
+			// URL уже есть, возвращаем специальную ошибку с существующим shortID
+			return &ErrOriginalAlreadyExists{ShortID: sid}
+		}
+	}
+
 	repo.data[shortID] = originalURL
 	return nil
 }
