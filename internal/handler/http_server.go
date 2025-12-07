@@ -71,10 +71,9 @@ func (srv *HTTPServer) handlePost(w http.ResponseWriter, r *http.Request) {
 	shortURL, err := srv.shorter.CreateShortURL(r.Context(), string(body), srv.baseURL)
 	if err != nil {
 		if errors.Is(err, service.ErrAlreadyExists) {
-			// URL уже есть в базе — возвращаем 409 и существующий короткий URL
 			w.Header().Set("Content-Type", "text/plain")
-			w.WriteHeader(http.StatusConflict)
-			w.Write([]byte(shortURL))
+			w.WriteHeader(http.StatusConflict) // 409
+			_, _ = w.Write([]byte(shortURL))   // уже существующий короткий URL
 			return
 		}
 
@@ -84,7 +83,7 @@ func (srv *HTTPServer) handlePost(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(shortURL))
+	_, _ = w.Write([]byte(shortURL))
 }
 
 // GET /{id}
@@ -107,6 +106,7 @@ func (srv *HTTPServer) handleGet(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/shorten
 func (srv *HTTPServer) handleAPIPost(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
 
 	var req model.ShortenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -114,13 +114,18 @@ func (srv *HTTPServer) handleAPIPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.URL == "" {
+		http.Error(w, "empty url field", http.StatusBadRequest)
+		return
+	}
+
 	shortURL, err := srv.shorter.CreateShortURL(r.Context(), req.URL, srv.baseURL)
 	if err != nil {
 		if errors.Is(err, service.ErrAlreadyExists) {
-			// URL уже есть — 409 и тот же формат JSON
 			resp := model.ShortenResponse{Result: shortURL}
 			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
+			w.WriteHeader(http.StatusConflict) // 409
+
 			if err := json.NewEncoder(w).Encode(resp); err != nil {
 				srv.logger.Error("failed to write JSON conflict response", zap.Error(err))
 			}
