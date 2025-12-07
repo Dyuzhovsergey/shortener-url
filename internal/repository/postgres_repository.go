@@ -32,10 +32,9 @@ func (r *PostgresRepository) Save(ctx context.Context, shortID, originalURL stri
 	if err == nil {
 		return nil
 	}
+	// Проверяем, не unique violation ли это
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
-		// Скорее всего, конфликт по original_url.
-		// Нужно найти существующий short_id для этого originalURL.
 		const selectQuery = `
 			SELECT short_id 
 			FROM short_urls 
@@ -47,7 +46,6 @@ func (r *PostgresRepository) Save(ctx context.Context, shortID, originalURL stri
 		if scanErr := row.Scan(&existingShortID); scanErr == nil {
 			return &ErrOriginalAlreadyExists{ShortID: existingShortID}
 		}
-		// если вдруг не нашли — вернём исходную ошибку
 		return err
 	}
 

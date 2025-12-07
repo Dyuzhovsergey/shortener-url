@@ -2,13 +2,14 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/Dyuzhovsergey/shortener-url/internal/config"
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 )
 
-// makeTestConfig — создаёт конфигурацию для тестов.
+// makeTestConfig — конфигурация для тестов.
 func makeTestConfig() *config.ShortenerConfig {
 	return &config.ShortenerConfig{
 		CharSet:  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
@@ -75,23 +76,25 @@ func TestCreateShortURL_Invalid(t *testing.T) {
 }
 
 // --- Тест на уникальность ID ---
-// При большом количестве генераций не должно быть дублей
 func TestCreateShortURL_Uniqueness(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	cfg := makeTestConfig()
 	svc := NewShorterService(repo, cfg)
 
-	original := "https://example.com"
 	baseURL := cfg.BaseURL
 
 	generated := make(map[string]bool)
 	const n = 1000
 
 	for i := 0; i < n; i++ {
+		// Делаем уникальный originalURL для каждого шага
+		original := fmt.Sprintf("https://example.com/%d", i)
+
 		shortURL, err := svc.CreateShortURL(context.Background(), original, baseURL)
 		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+			t.Fatalf("unexpected error on iteration %d: %v", i, err)
 		}
+
 		id := shortURL[len(baseURL)+1:]
 		if generated[id] {
 			t.Fatalf("duplicate shortID generated: %s", id)
