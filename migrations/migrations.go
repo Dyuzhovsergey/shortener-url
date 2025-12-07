@@ -6,16 +6,24 @@ import (
 	"database/sql"
 )
 
-const createShortURLsTable = `
-CREATE TABLE IF NOT EXISTS short_urls (
-    id SERIAL PRIMARY KEY,
-    short_id VARCHAR(255) NOT NULL UNIQUE,
-    original_url TEXT NOT NULL
-);
-`
-
-// Run выполняет необходимые миграции (пока одна, но можно наращивать).
 func Run(ctx context.Context, db *sql.DB) error {
-	_, err := db.ExecContext(ctx, createShortURLsTable)
-	return err
+	const createTable = `
+		CREATE TABLE IF NOT EXISTS short_urls (
+			short_id TEXT PRIMARY KEY,
+			original_url TEXT NOT NULL
+		);
+	`
+	if _, err := db.ExecContext(ctx, createTable); err != nil {
+		return err
+	}
+
+	const createUniqueIndex = `
+		CREATE UNIQUE INDEX IF NOT EXISTS short_urls_original_url_uindex
+		ON short_urls (original_url);
+	`
+	if _, err := db.ExecContext(ctx, createUniqueIndex); err != nil {
+		return err
+	}
+
+	return nil
 }
