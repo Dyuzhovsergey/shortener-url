@@ -116,9 +116,21 @@ func (srv *HTTPServer) handleAPIPost(w http.ResponseWriter, r *http.Request) {
 
 	shortURL, err := srv.shorter.CreateShortURL(r.Context(), req.URL, srv.baseURL)
 	if err != nil {
+		if errors.Is(err, service.ErrAlreadyExists) {
+			// URL уже есть — 409 и тот же формат JSON
+			resp := model.ShortenResponse{Result: shortURL}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			if err := json.NewEncoder(w).Encode(resp); err != nil {
+				srv.logger.Error("failed to write JSON conflict response", zap.Error(err))
+			}
+			return
+		}
+
 		http.Error(w, "invalid URL format", http.StatusBadRequest)
 		return
 	}
+
 	resp := model.ShortenResponse{Result: shortURL}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
