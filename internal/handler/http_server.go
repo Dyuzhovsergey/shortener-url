@@ -4,6 +4,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 
@@ -69,6 +70,14 @@ func (srv *HTTPServer) handlePost(w http.ResponseWriter, r *http.Request) {
 
 	shortURL, err := srv.shorter.CreateShortURL(r.Context(), string(body), srv.baseURL)
 	if err != nil {
+		if errors.Is(err, service.ErrAlreadyExists) {
+			// URL уже есть в базе — возвращаем 409 и существующий короткий URL
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusConflict)
+			w.Write([]byte(shortURL))
+			return
+		}
+
 		http.Error(w, "Invalid URL format", http.StatusBadRequest)
 		return
 	}
