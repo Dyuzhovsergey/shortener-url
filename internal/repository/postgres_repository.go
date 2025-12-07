@@ -3,6 +3,10 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
+
+	"github.com/jackc/pgconn"
+	"github.com/jackc/pgerrcode"
 )
 
 // PostgresRepository — реализация Repository в PostgreSQL.
@@ -25,6 +29,28 @@ func (r *PostgresRepository) Save(ctx context.Context, shortID, originalURL stri
 	`
 
 	_, err := r.db.ExecContext(ctx, query, shortID, originalURL)
+	if err == nil {
+		return nil
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
+		// Скорее всего, конфликт по original_url.
+		// Нужно найти существующий short_id для этого originalURL.
+		const selectQuery = `
+			SELECT short_id 
+			FROM short_urls 
+			WHERE original_url = $1
+			LIMIT 1;
+		`
+		var existingShortID string
+		row := r.db.QueryRowContext(ctx, selectQuery, originalURL)
+		if scanErr := row.Scan(&existingShortID); scanErr == nil {
+			return &ErrOriginalAlreadyExists{ShortID: existingShortID}
+		}
+		// если вдруг не нашли — вернём исходную ошибку
+		return err
+	}
+
 	return err
 }
 
