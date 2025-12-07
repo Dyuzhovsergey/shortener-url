@@ -253,7 +253,7 @@ func TestHandleAPIPostBatch_OK(t *testing.T) {
 		t.Errorf("expected short_url to start with http://localhost:8080/, got %s", resp[1].ShortURL)
 	}
 
-	// 6) Дополнительно проверим, что первая ссылка реально сохранилась в сервисе
+	// 6) Поверим, что первая ссылка реально сохранилась в сервисе
 	firstShort := resp[0].ShortURL
 	const base = "http://localhost:8080"
 	if !strings.HasPrefix(firstShort, base+"/") {
