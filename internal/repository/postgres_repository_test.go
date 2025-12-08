@@ -20,15 +20,14 @@ func TestPostgresRepository_Save_OK(t *testing.T) {
 	shortID := "abc123"
 	original := "https://example.com"
 
-	// 1. Сначала ожидаем SELECT по original_url — вернётся sql.ErrNoRows.
-	mock.ExpectQuery(`SELECT short_id FROM short_urls WHERE original_url = \$1`).
-		WithArgs(original).
-		WillReturnError(sql.ErrNoRows)
+	// Ожидаем один запрос INSERT ... ON CONFLICT ... RETURNING short_id
+	// и возвращаем тот же shortID, который мы вставляем.
+	rows := sqlmock.NewRows([]string{"short_id"}).
+		AddRow(shortID)
 
-	// 2. Затем ожидаем INSERT.
-	mock.ExpectExec(`INSERT INTO short_urls`).
+	mock.ExpectQuery(`INSERT INTO short_urls`).
 		WithArgs(shortID, original).
-		WillReturnResult(sqlmock.NewResult(1, 1))
+		WillReturnRows(rows)
 
 	err = repo.Save(context.Background(), shortID, original)
 	require.NoError(t, err)
@@ -104,16 +103,19 @@ func TestPostgresRepository_Save_Duplicate(t *testing.T) {
 
 	existingShortID := "old123"
 	original := "https://example.com"
+	newShortID := "new456"
 
-	// 1. SELECT по original_url — находим уже существующую запись.
+	// INSERT ... ON CONFLICT ... RETURNING short_id
+	// возвращает существующий short_id (existingShortID),
+	// хотя мы пытаемся вставить newShortID.
 	rows := sqlmock.NewRows([]string{"short_id"}).
 		AddRow(existingShortID)
 
-	mock.ExpectQuery(`SELECT short_id FROM short_urls WHERE original_url = \$1`).
-		WithArgs(original).
+	mock.ExpectQuery(`INSERT INTO short_urls`).
+		WithArgs(newShortID, original).
 		WillReturnRows(rows)
 
-	err = repo.Save(context.Background(), "newID", original)
+	err = repo.Save(context.Background(), newShortID, original)
 	require.Error(t, err)
 
 	var dupErr *ErrOriginalAlreadyExists
