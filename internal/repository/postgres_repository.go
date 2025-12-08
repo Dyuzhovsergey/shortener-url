@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"errors"
 )
 
 // PostgresRepository — реализация Repository в PostgreSQL.
@@ -19,35 +18,26 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 // Save сохраняет оригинальный URL по shortID.
 func (r *PostgresRepository) Save(ctx context.Context, shortID, originalURL string) error {
 	// 1. Проверяем, есть ли уже такой original_url
-	const selectQuery = `
-        SELECT short_id
-        FROM short_urls
-        WHERE original_url = $1
-        LIMIT 1;
-    `
-	var existingShortID string
-	err := r.db.QueryRowContext(ctx, selectQuery, originalURL).Scan(&existingShortID)
-
-	switch {
-	case err == nil:
-		// Такой original_url уже есть
-		return &ErrOriginalAlreadyExists{ShortID: existingShortID}
-
-	case errors.Is(err, sql.ErrNoRows):
-		// Всё ок, такой записи нет — идём делать INSERT
-
-	default:
-		// Любая другая ошибка БД
+	const query = `
+	INSERT INTO short_urls (short_id, original_url)
+	VALUES ($1, $2)
+	ON CONFLICT (original_url) DO UPDATE
+	SET short_id = short_urls.short_id
+	RETURNING short_id;
+`
+	var returnedShortID string
+	err := r.db.QueryRowContext(ctx, query, shortID, originalURL).Scan(&returnedShortID)
+	if err != nil {
 		return err
 	}
 
-	// 2. Такого URL ещё нет — вставляем новую запись
-	const insertQuery = `
-        INSERT INTO short_urls (short_id, original_url)
-        VALUES ($1, $2);
-    `
-	_, err = r.db.ExecContext(ctx, insertQuery, shortID, originalURL)
-	return err
+	// Если вернулся не тот shortID, который мы предлагали,
+	// значит URL уже был и мы получили старый shortID.
+	if returnedShortID != shortID {
+		return &ErrOriginalAlreadyExists{ShortID: returnedShortID}
+	}
+
+	return nil
 }
 
 // Get возвращает оригинальный URL по shortID.
