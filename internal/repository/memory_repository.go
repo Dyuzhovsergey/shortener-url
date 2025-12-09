@@ -32,7 +32,6 @@ func (repo *MemoryRepository) Save(ctx context.Context, shortID, originalURL str
 
 	// 2. Проверяем, не существует ли уже такой originalURL
 	if existingShortID, ok := repo.reverse[originalURL]; ok && existingShortID != shortID {
-		// Такой URL уже сокращён другим shortID — сигнализируем об этом
 		return &ErrOriginalAlreadyExists{ShortID: existingShortID}
 	}
 

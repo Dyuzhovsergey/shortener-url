@@ -20,7 +20,8 @@ type urlRecord struct {
 type FileRepository struct {
 	mu       sync.RWMutex
 	data     map[string]string // shortID -> originalURL
-	records  []urlRecord       // для записи и чтения файла
+	reverse  map[string]string // originalURL -> shortID (для быстрого поиска дубликатов)
+	records  []urlRecord       // то, что пишем в файл
 	filePath string
 }
 
@@ -28,6 +29,7 @@ type FileRepository struct {
 func NewFileRepository(path string) (*FileRepository, error) {
 	fr := &FileRepository{
 		data:     make(map[string]string),
+		reverse:  make(map[string]string),
 		records:  make([]urlRecord, 0),
 		filePath: path,
 	}
@@ -75,16 +77,22 @@ func (fr *FileRepository) Save(ctx context.Context, shortID, originalURL string)
 	fr.mu.Lock()
 	defer fr.mu.Unlock()
 
-	for sid, url := range fr.data {
-		if url == originalURL {
-			return &ErrOriginalAlreadyExists{ShortID: sid}
-		}
+	// 1. Проверяем, не существует ли уже такой originalURL
+	if existingShortID, ok := fr.reverse[originalURL]; ok && existingShortID != shortID {
+		// Этот URL уже сокращён, возвращаем ту же семантику, что и в Postgres/Memory
+		return &ErrOriginalAlreadyExists{ShortID: existingShortID}
 	}
 
-	// если уже есть такая запись — просто обновим мапу и файл
-	fr.data[shortID] = originalURL
+	// 2. Если по этому shortID уже был другой URL — подчистим reverse
+	if oldURL, ok := fr.data[shortID]; ok && oldURL != originalURL {
+		delete(fr.reverse, oldURL)
+	}
 
-	// добавляем новую запись с "uuid" = порядковый номер
+	// 3. Обновляем мапы
+	fr.data[shortID] = originalURL
+	fr.reverse[originalURL] = shortID
+
+	// 4. Добавляем новую запись в слайс записей
 	recordID := strconv.Itoa(len(fr.records) + 1)
 	rec := urlRecord{
 		RecordID:    recordID,
@@ -93,7 +101,7 @@ func (fr *FileRepository) Save(ctx context.Context, shortID, originalURL string)
 	}
 	fr.records = append(fr.records, rec)
 
-	// открываем файл на перезапись
+	// 5. Перезаписываем файл JSON-массивом
 	f, err := os.OpenFile(fr.filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
