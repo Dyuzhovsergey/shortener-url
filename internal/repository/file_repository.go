@@ -79,7 +79,6 @@ func (fr *FileRepository) Save(ctx context.Context, shortID, originalURL string)
 
 	// 1. Проверяем, не существует ли уже такой originalURL
 	if existingShortID, ok := fr.reverse[originalURL]; ok && existingShortID != shortID {
-		// Этот URL уже сокращён, возвращаем ту же семантику, что и в Postgres/Memory
 		return &ErrOriginalAlreadyExists{ShortID: existingShortID}
 	}
 
