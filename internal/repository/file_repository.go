@@ -77,14 +77,14 @@ func (fr *FileRepository) Save(ctx context.Context, shortID, originalURL string)
 	fr.mu.Lock()
 	defer fr.mu.Unlock()
 
-	// 1. Проверяем, не существует ли уже такой originalURL
-	if existingShortID, ok := fr.reverse[originalURL]; ok && existingShortID != shortID {
-		return &ErrOriginalAlreadyExists{ShortID: existingShortID}
-	}
-
-	// 2. Если по этому shortID уже был другой URL — подчистим reverse
+	// 1. Если по этому shortID уже был другой URL — подчистим reverse
 	if oldURL, ok := fr.data[shortID]; ok && oldURL != originalURL {
 		delete(fr.reverse, oldURL)
+	}
+
+	// 2. Проверяем, не существует ли уже такой originalURL
+	if existingShortID, ok := fr.reverse[originalURL]; ok && existingShortID != shortID {
+		return &ErrOriginalAlreadyExists{ShortID: existingShortID}
 	}
 
 	// 3. Обновляем мапы
