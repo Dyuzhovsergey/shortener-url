@@ -36,7 +36,6 @@ func (r *PostgresRepository) Save(ctx context.Context, shortID, originalURL stri
 	if returnedShortID != shortID {
 		return &ErrOriginalAlreadyExists{ShortID: returnedShortID}
 	}
-
 	return nil
 }
 

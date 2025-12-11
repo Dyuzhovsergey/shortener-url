@@ -24,6 +24,5 @@ func Run(ctx context.Context, db *sql.DB) error {
 	if _, err := db.ExecContext(ctx, createUniqueIndex); err != nil {
 		return err
 	}
-
 	return nil
 }

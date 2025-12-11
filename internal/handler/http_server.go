@@ -122,7 +122,7 @@ func (srv *HTTPServer) handleAPIPost(w http.ResponseWriter, r *http.Request) {
 
 	shortURL, err := srv.shorter.CreateShortURL(r.Context(), req.URL, srv.baseURL)
 	if err != nil {
-		// 🔹 Конфликт: shortURL не пустой + ошибка → URL уже есть в базе
+		// Конфликт: shortURL не пустой + ошибка → URL уже есть в базе
 		if shortURL != "" {
 			resp := model.ShortenResponse{Result: shortURL}
 			w.Header().Set("Content-Type", "application/json")
