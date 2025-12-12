@@ -212,24 +212,18 @@ func (srv *HTTPServer) handleAPIPostBatch(w http.ResponseWriter, r *http.Request
 	}
 }
 
+// GET /api/user/urls
 func (srv *HTTPServer) handleUserURLs(w http.ResponseWriter, r *http.Request) {
-	// Пробуем вытащить userID прямо из контекста.
-	userID, ok := middleware.UserIDFromContext(r.Context())
-	if !ok || userID == "" {
-		// По ТЗ: если кука есть, но в ней нет ID → 401.
-		// В нашем случае это эквивалентно "ID не смогли вытащить".
-		w.WriteHeader(http.StatusUnauthorized)
-		return
-	}
-
+	// Никаких 401 здесь: считаем, что AuthMiddleware уже выдал/проверил куку
 	userURLs := srv.shorter.GetUserURLs(r.Context())
 
 	if len(userURLs) == 0 {
-		// По ТЗ: при отсутствии ссылок → 204 No Content
+		// по ТЗ: если у пользователя нет сокращённых URL → 204 No Content
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
+	// готовим JSON-ответ
 	resp := make([]model.UserURLResponse, 0, len(userURLs))
 	for _, u := range userURLs {
 		resp = append(resp, model.UserURLResponse{
