@@ -18,20 +18,30 @@ const maxAttempts = 10
 
 var ErrAlreadyExists = errors.New("URL already exists")
 
+// UserURL для пользователя
+type UserURL struct {
+	ShortURL    string
+	OriginalURL string
+}
+
 // ShorterService отвечает за бизнес-логику: валидацию, генерацию ID и сохранение ссылок.
 type ShorterService struct {
 	repo repository.Repository
 	cfg  *config.ShortenerConfig
 	rnd  *rand.Rand
 	mu   sync.Mutex
+
+	userMu   sync.RWMutex
+	userURLs map[string][]UserURL // список ссылок User
 }
 
 // NewShorterService - Конструктор с внедрением зависимости (DI)
 func NewShorterService(repo repository.Repository, cfg *config.ShortenerConfig) *ShorterService {
 	return &ShorterService{
-		repo: repo,
-		cfg:  cfg,
-		rnd:  rand.New(rand.NewSource(time.Now().UnixNano())),
+		repo:     repo,
+		cfg:      cfg,
+		rnd:      rand.New(rand.NewSource(time.Now().UnixNano())),
+		userURLs: make(map[string][]UserURL),
 	}
 }
 
