@@ -21,3 +21,9 @@ type BatchShortenResponseItem struct {
 	CorrelationID string `json:"correlation_id"`
 	ShortURL      string `json:"short_url"`
 }
+
+// UserURLResponse - элемент ответа /api/user/urls.
+type UserURLResponse struct {
+	ShortURL    string `json:"short_url"`
+	OriginalURL string `json:"original_url"`
+}
