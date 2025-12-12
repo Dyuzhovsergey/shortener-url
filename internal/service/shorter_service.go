@@ -140,6 +140,23 @@ func (svc *ShorterService) generateID() string {
 	return string(id)
 }
 
+// GetUserURLs для получения ссылок пользователя
+func (svc *ShorterService) GetUserURLs(ctx context.Context) []UserURL {
+	userID, ok := middleware.UserIDFromContext(ctx)
+	if !ok || userID == "" {
+		return nil
+	}
+
+	svc.userMu.RLock()
+	defer svc.userMu.RUnlock()
+
+	urls := svc.userURLs[userID]
+	// делаем копию, чтобы снаружи не ломали внутренний слайс
+	result := make([]UserURL, len(urls))
+	copy(result, urls)
+	return result
+}
+
 // CreateShortURLBatch — обрабатывает батч URL'ов.
 // На каждый originalURL создаёт shortID, сохраняет через repo и возвращает список результатов.
 func (svc *ShorterService) CreateShortURLBatch(ctx context.Context, baseURL string, items []BatchItem) ([]BatchResult, error) {
