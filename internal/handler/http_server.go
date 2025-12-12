@@ -212,7 +212,6 @@ func (srv *HTTPServer) handleAPIPostBatch(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// GET /api/user/urls
 func (srv *HTTPServer) handleUserURLs(w http.ResponseWriter, r *http.Request) {
 	// Пробуем вытащить userID прямо из контекста.
 	userID, ok := middleware.UserIDFromContext(r.Context())
