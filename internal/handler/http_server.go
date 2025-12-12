@@ -50,6 +50,7 @@ func (srv *HTTPServer) Router() http.Handler {
 	r.Post("/api/shorten", srv.handleAPIPost)
 	r.Get("/ping", srv.handlePing)
 	r.Post("/api/shorten/batch", srv.handleAPIPostBatch)
+	r.Get("/api/user/urls", srv.handleUserURLs)
 	return r
 }
 
@@ -208,5 +209,39 @@ func (srv *HTTPServer) handleAPIPostBatch(w http.ResponseWriter, r *http.Request
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		srv.logger.Error("failed to write JSON batch response", zap.Error(err))
+	}
+}
+
+// GET /api/user/urls
+func (srv *HTTPServer) handleUserURLs(w http.ResponseWriter, r *http.Request) {
+	// Пробуем вытащить userID прямо из контекста.
+	userID, ok := middleware.UserIDFromContext(r.Context())
+	if !ok || userID == "" {
+		// По ТЗ: если кука есть, но в ней нет ID → 401.
+		// В нашем случае это эквивалентно "ID не смогли вытащить".
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	userURLs := srv.shorter.GetUserURLs(r.Context())
+
+	if len(userURLs) == 0 {
+		// По ТЗ: при отсутствии ссылок → 204 No Content
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	resp := make([]model.UserURLResponse, 0, len(userURLs))
+	for _, u := range userURLs {
+		resp = append(resp, model.UserURLResponse{
+			ShortURL:    u.ShortURL,
+			OriginalURL: u.OriginalURL,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		srv.logger.Error("failed to write /api/user/urls response", zap.Error(err))
 	}
 }
