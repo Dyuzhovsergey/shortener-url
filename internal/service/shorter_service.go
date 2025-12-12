@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Dyuzhovsergey/shortener-url/internal/config"
+	"github.com/Dyuzhovsergey/shortener-url/internal/middleware"
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 )
 
@@ -88,13 +89,37 @@ func (svc *ShorterService) CreateShortURL(ctx context.Context, originalURL strin
 	if err := svc.repo.Save(ctx, shortID, originalURL); err != nil {
 		var dup *repository.ErrOriginalAlreadyExists
 		if errors.As(err, &dup) {
+			// URL уже есть в хранилище — строим существующую короткую
 			existingShortURL := baseURL + "/" + dup.ShortID
+
+			// ⬇ отмечаем за этим пользователем уже существующую ссылку
+			if userID, ok := middleware.UserIDFromContext(ctx); ok {
+				svc.userMu.Lock()
+				svc.userURLs[userID] = append(svc.userURLs[userID], UserURL{
+					ShortURL:    existingShortURL,
+					OriginalURL: originalURL,
+				})
+				svc.userMu.Unlock()
+			}
+
 			return existingShortURL, ErrAlreadyExists
 		}
 		return "", err
 	}
 
+	// Успешно создали новую
 	shortURL := baseURL + "/" + shortID
+
+	// ⬇ привязываем её к пользователю
+	if userID, ok := middleware.UserIDFromContext(ctx); ok {
+		svc.userMu.Lock()
+		svc.userURLs[userID] = append(svc.userURLs[userID], UserURL{
+			ShortURL:    shortURL,
+			OriginalURL: originalURL,
+		})
+		svc.userMu.Unlock()
+	}
+
 	return shortURL, nil
 }
 
