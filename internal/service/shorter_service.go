@@ -31,18 +31,14 @@ type ShorterService struct {
 	cfg  *config.ShortenerConfig
 	rnd  *rand.Rand
 	mu   sync.Mutex
-
-	userMu   sync.RWMutex
-	userURLs map[string][]UserURL // список ссылок User
 }
 
 // NewShorterService - Конструктор с внедрением зависимости (DI)
 func NewShorterService(repo repository.Repository, cfg *config.ShortenerConfig) *ShorterService {
 	return &ShorterService{
-		repo:     repo,
-		cfg:      cfg,
-		rnd:      rand.New(rand.NewSource(time.Now().UnixNano())),
-		userURLs: make(map[string][]UserURL),
+		repo: repo,
+		cfg:  cfg,
+		rnd:  rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
@@ -85,23 +81,13 @@ func (svc *ShorterService) CreateShortURL(ctx context.Context, originalURL strin
 	if _, exists := svc.repo.Get(ctx, shortID); exists {
 		return "", errors.New("failed to generate unique shortID")
 	}
+	userID, _ := middleware.UserIDFromContext(ctx)
 
-	if err := svc.repo.Save(ctx, shortID, originalURL); err != nil {
+	if err := svc.repo.Save(ctx, shortID, originalURL, userID); err != nil {
 		var dup *repository.ErrOriginalAlreadyExists
 		if errors.As(err, &dup) {
 			// URL уже есть в хранилище — строим существующую короткую
 			existingShortURL := baseURL + "/" + dup.ShortID
-
-			// ⬇ отмечаем за этим пользователем уже существующую ссылку
-			if userID, ok := middleware.UserIDFromContext(ctx); ok {
-				svc.userMu.Lock()
-				svc.userURLs[userID] = append(svc.userURLs[userID], UserURL{
-					ShortURL:    existingShortURL,
-					OriginalURL: originalURL,
-				})
-				svc.userMu.Unlock()
-			}
-
 			return existingShortURL, ErrAlreadyExists
 		}
 		return "", err
@@ -109,16 +95,6 @@ func (svc *ShorterService) CreateShortURL(ctx context.Context, originalURL strin
 
 	// Успешно создали новую
 	shortURL := baseURL + "/" + shortID
-
-	// ⬇ привязываем её к пользователю
-	if userID, ok := middleware.UserIDFromContext(ctx); ok {
-		svc.userMu.Lock()
-		svc.userURLs[userID] = append(svc.userURLs[userID], UserURL{
-			ShortURL:    shortURL,
-			OriginalURL: originalURL,
-		})
-		svc.userMu.Unlock()
-	}
 
 	return shortURL, nil
 }
@@ -141,20 +117,12 @@ func (svc *ShorterService) generateID() string {
 }
 
 // GetUserURLs для получения ссылок пользователя
-func (svc *ShorterService) GetUserURLs(ctx context.Context) []UserURL {
+func (svc *ShorterService) GetUserURLs(ctx context.Context) ([]repository.UserURL, error) {
 	userID, ok := middleware.UserIDFromContext(ctx)
 	if !ok || userID == "" {
-		return nil
+		return nil, nil
 	}
-
-	svc.userMu.RLock()
-	defer svc.userMu.RUnlock()
-
-	urls := svc.userURLs[userID]
-	// делаем копию, чтобы снаружи не ломали внутренний слайс
-	result := make([]UserURL, len(urls))
-	copy(result, urls)
-	return result
+	return svc.repo.GetUserURLs(ctx, userID)
 }
 
 // CreateShortURLBatch — обрабатывает батч URL'ов.

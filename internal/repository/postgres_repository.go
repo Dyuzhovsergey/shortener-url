@@ -16,11 +16,11 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 }
 
 // Save сохраняет оригинальный URL по shortID.
-func (r *PostgresRepository) Save(ctx context.Context, shortID, originalURL string) error {
+func (r *PostgresRepository) Save(ctx context.Context, shortID, originalURL, userID string) error {
 	// 1. Проверяем, есть ли уже такой original_url
 	const query = `
-	INSERT INTO short_urls (short_id, original_url)
-	VALUES ($1, $2)
+	INSERT INTO short_urls (short_id, original_url, user_id)
+	VALUES ($1, $2, $3)
 	ON CONFLICT (original_url) DO UPDATE
 	SET short_id = short_urls.short_id
 	RETURNING short_id;

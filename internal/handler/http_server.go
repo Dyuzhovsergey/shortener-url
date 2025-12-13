@@ -221,21 +221,18 @@ func (srv *HTTPServer) handleUserURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userURLs := srv.shorter.GetUserURLs(r.Context())
+	userURLs, err := srv.shorter.GetUserURLs(r.Context())
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError) // 500
+		return
+	}
+
 	if len(userURLs) == 0 {
 		w.WriteHeader(http.StatusNoContent) // 204
 		return
 	}
 
-	resp := make([]model.UserURLResponse, 0, len(userURLs))
-	for _, u := range userURLs {
-		resp = append(resp, model.UserURLResponse{
-			ShortURL:    u.ShortURL,
-			OriginalURL: u.OriginalURL,
-		})
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(userURLs)
 }

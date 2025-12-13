@@ -14,6 +14,7 @@ type urlRecord struct {
 	RecordID    string `json:"record_id"`
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
+	UserID      string `json:"user_id"`
 }
 
 // FileRepository — реализация Repository с сохранением на диск.
@@ -73,7 +74,7 @@ func NewFileRepository(path string) (*FileRepository, error) {
 }
 
 // Save сохраняет оригинальный URL по shortID и перезаписывает файл.
-func (fr *FileRepository) Save(ctx context.Context, shortID, originalURL string) error {
+func (fr *FileRepository) Save(ctx context.Context, shortID, originalURL, userID string) error {
 	fr.mu.Lock()
 	defer fr.mu.Unlock()
 
@@ -97,6 +98,7 @@ func (fr *FileRepository) Save(ctx context.Context, shortID, originalURL string)
 		RecordID:    recordID,
 		ShortURL:    shortID,
 		OriginalURL: originalURL,
+		UserID:      userID,
 	}
 	fr.records = append(fr.records, rec)
 

@@ -7,21 +7,23 @@ import (
 
 // MemoryRepository — реализация Repository в оперативной памяти.
 type MemoryRepository struct {
-	data    map[string]string // shortID -> originalURL
-	reverse map[string]string // originalURL -> shortID
-	mu      sync.RWMutex
+	data      map[string]string            // shortID -> originalURL
+	reverse   map[string]string            // originalURL -> shortID
+	userIndex map[string]map[string]string // userID -> (shortID -> originalURL)
+	mu        sync.RWMutex
 }
 
 // NewMemoryRepository — конструктор.
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		data:    make(map[string]string),
-		reverse: make(map[string]string),
+		data:      make(map[string]string),
+		reverse:   make(map[string]string),
+		userIndex: make(map[string]map[string]string),
 	}
 }
 
 // Save сохраняет оригинальный URL по shortID.
-func (repo *MemoryRepository) Save(ctx context.Context, shortID, originalURL string) error {
+func (repo *MemoryRepository) Save(ctx context.Context, shortID, originalURL, userID string) error {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 
@@ -39,6 +41,15 @@ func (repo *MemoryRepository) Save(ctx context.Context, shortID, originalURL str
 	repo.data[shortID] = originalURL
 	repo.reverse[originalURL] = shortID
 
+	if userID != "" {
+		m, ok := repo.userIndex[userID]
+		if !ok {
+			m = make(map[string]string)
+			repo.userIndex[userID] = m
+		}
+		m[shortID] = originalURL
+	}
+
 	return nil
 }
 
@@ -48,4 +59,27 @@ func (repo *MemoryRepository) Get(ctx context.Context, shortID string) (string, 
 	defer repo.mu.RUnlock()
 	url, ok := repo.data[shortID]
 	return url, ok
+}
+
+func (repo *MemoryRepository) GetUserURLs(ctx context.Context, userID string) ([]UserURL, error) {
+	if userID == "" {
+		return nil, nil
+	}
+
+	repo.mu.RLock()
+	defer repo.mu.RUnlock()
+
+	m, ok := repo.userIndex[userID]
+	if !ok || len(m) == 0 {
+		return nil, nil
+	}
+
+	res := make([]UserURL, 0, len(m))
+	for shortID, originalURL := range m {
+		res = append(res, UserURL{
+			ShortID:     shortID,
+			OriginalURL: originalURL,
+		})
+	}
+	return res, nil
 }
