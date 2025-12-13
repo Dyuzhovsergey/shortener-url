@@ -72,14 +72,33 @@ func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var userID string
 
-		// 1. Пытаемся прочитать существующую куку
 		if c, err := r.Cookie(userIDCookieName); err == nil {
-			if id, ok := parseAndVerifyCookie(c.Value); ok {
+			val := strings.TrimSpace(c.Value)
+
+			// Кука есть, но она пустая -> "нет ID" -> отдадим пустой userID в контекст
+			if val == "" {
+				ctx := context.WithValue(r.Context(), userIDKey{}, "")
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			// Кука формата "userID.signature"
+			parts := strings.Split(val, ".")
+			// Если формат похож на наш, но userID пустой -> "есть кука, но нет ID" -> 401 в хендлере
+			if len(parts) == 2 && strings.TrimSpace(parts[0]) == "" {
+				ctx := context.WithValue(r.Context(), userIDKey{}, "")
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			// Если подпись ок -> используем userID
+			if id, ok := parseAndVerifyCookie(val); ok {
 				userID = id
 			}
+			// иначе userID останется пустым -> ниже сгенерим новую куку (как требует ТЗ)
 		}
 
-		// 2. Если куки нет или она невалидна — генерируем новую
+		// Куки нет или подпись невалидна -> выдаём новую
 		if userID == "" {
 			id, err := generateUserID()
 			if err != nil {
@@ -87,17 +106,15 @@ func AuthMiddleware(next http.Handler) http.Handler {
 				return
 			}
 			userID = id
-			val := buildCookieValue(userID)
+
 			http.SetCookie(w, &http.Cookie{
 				Name:     userIDCookieName,
-				Value:    val,
+				Value:    buildCookieValue(userID),
 				Path:     "/",
 				HttpOnly: true,
-				// Можно добавить Secure/SameSite по желанию
 			})
 		}
 
-		// 3. Кладём userID в контекст и передаём дальше
 		ctx := context.WithValue(r.Context(), userIDKey{}, userID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

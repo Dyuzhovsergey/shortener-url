@@ -44,13 +44,14 @@ func (srv *HTTPServer) Router() http.Handler {
 
 	r.Use(middleware.ZapLogger(srv.logger))
 	r.Use(middleware.GzipMiddleware)
+	r.Use(middleware.AuthMiddleware)
 
-	r.Get("/{id}", srv.handleGet)
 	r.Post("/", srv.handlePost)
 	r.Post("/api/shorten", srv.handleAPIPost)
 	r.Get("/ping", srv.handlePing)
 	r.Post("/api/shorten/batch", srv.handleAPIPostBatch)
 	r.Get("/api/user/urls", srv.handleUserURLs)
+	r.Get("/{id}", srv.handleGet)
 	return r
 }
 
@@ -214,16 +215,18 @@ func (srv *HTTPServer) handleAPIPostBatch(w http.ResponseWriter, r *http.Request
 
 // GET /api/user/urls
 func (srv *HTTPServer) handleUserURLs(w http.ResponseWriter, r *http.Request) {
-	// Никаких 401 здесь: считаем, что AuthMiddleware уже выдал/проверил куку
-	userURLs := srv.shorter.GetUserURLs(r.Context())
-
-	if len(userURLs) == 0 {
-		// по ТЗ: если у пользователя нет сокращённых URL → 204 No Content
-		w.WriteHeader(http.StatusNoContent)
+	userID, ok := middleware.UserIDFromContext(r.Context())
+	if !ok || userID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized) // 401
 		return
 	}
 
-	// готовим JSON-ответ
+	userURLs := srv.shorter.GetUserURLs(r.Context())
+	if len(userURLs) == 0 {
+		w.WriteHeader(http.StatusNoContent) // 204
+		return
+	}
+
 	resp := make([]model.UserURLResponse, 0, len(userURLs))
 	for _, u := range userURLs {
 		resp = append(resp, model.UserURLResponse{
@@ -234,7 +237,5 @@ func (srv *HTTPServer) handleUserURLs(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		srv.logger.Error("failed to write /api/user/urls response", zap.Error(err))
-	}
+	_ = json.NewEncoder(w).Encode(resp)
 }

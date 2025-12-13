@@ -16,3 +16,8 @@ type ErrOriginalAlreadyExists struct {
 func (e *ErrOriginalAlreadyExists) Error() string {
 	return "original URL already exists"
 }
+
+type UserURL struct {
+	ShortID     string
+	OriginalURL string
+}
