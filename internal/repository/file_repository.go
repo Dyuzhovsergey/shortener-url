@@ -12,27 +12,31 @@ import (
 
 type urlRecord struct {
 	RecordID    string `json:"record_id"`
-	ShortURL    string `json:"short_url"`
+	ShortID     string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
 	UserID      string `json:"user_id"`
 }
 
 // FileRepository — реализация Repository с сохранением на диск.
 type FileRepository struct {
-	mu       sync.RWMutex
-	data     map[string]string // shortID -> originalURL
-	reverse  map[string]string // originalURL -> shortID (для быстрого поиска дубликатов)
-	records  []urlRecord       // то, что пишем в файл
+	mu sync.RWMutex
+
+	data      map[string]string            // shortID -> originalURL
+	reverse   map[string]string            // originalURL -> shortID (для быстрого поиска дубликатов)
+	userIndex map[string]map[string]string // userID -> (shortID -> originalURL)
+
+	records  []urlRecord // то, что пишем в файл
 	filePath string
 }
 
 // NewFileRepository создаёт файловый репозиторий и загружает данные из файла, если он есть.
 func NewFileRepository(path string) (*FileRepository, error) {
 	fr := &FileRepository{
-		data:     make(map[string]string),
-		reverse:  make(map[string]string),
-		records:  make([]urlRecord, 0),
-		filePath: path,
+		data:      make(map[string]string),
+		reverse:   make(map[string]string),
+		userIndex: make(map[string]map[string]string),
+		records:   make([]urlRecord, 0),
+		filePath:  path,
 	}
 
 	// открываем файл
@@ -65,9 +69,20 @@ func NewFileRepository(path string) (*FileRepository, error) {
 	}
 
 	// наполняем мапу и внутренний слайс
+	// восстанавливаем индексы
 	for _, rec := range records {
 		fr.records = append(fr.records, rec)
-		fr.data[rec.ShortURL] = rec.OriginalURL
+		fr.data[rec.ShortID] = rec.OriginalURL
+		fr.reverse[rec.OriginalURL] = rec.ShortID
+
+		if rec.UserID != "" {
+			m, ok := fr.userIndex[rec.UserID]
+			if !ok {
+				m = make(map[string]string)
+				fr.userIndex[rec.UserID] = m
+			}
+			m[rec.ShortID] = rec.OriginalURL
+		}
 	}
 
 	return fr, nil
@@ -88,21 +103,28 @@ func (fr *FileRepository) Save(ctx context.Context, shortID, originalURL, userID
 		return &ErrOriginalAlreadyExists{ShortID: existingShortID}
 	}
 
-	// 3. Обновляем мапы
+	// 3) сохраняем в индексы
 	fr.data[shortID] = originalURL
 	fr.reverse[originalURL] = shortID
+	if userID != "" {
+		m, ok := fr.userIndex[userID]
+		if !ok {
+			m = make(map[string]string)
+			fr.userIndex[userID] = m
+		}
+		m[shortID] = originalURL
+	}
 
-	// 4. Добавляем новую запись в слайс записей
+	// 4) добавляем запись в records
 	recordID := strconv.Itoa(len(fr.records) + 1)
-	rec := urlRecord{
+	fr.records = append(fr.records, urlRecord{
 		RecordID:    recordID,
-		ShortURL:    shortID,
+		ShortID:     shortID,
 		OriginalURL: originalURL,
 		UserID:      userID,
-	}
-	fr.records = append(fr.records, rec)
+	})
 
-	// 5. Перезаписываем файл JSON-массивом
+	// 5) перезаписываем файл (у тебя так и было)
 	f, err := os.OpenFile(fr.filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
@@ -124,4 +146,27 @@ func (fr *FileRepository) Get(ctx context.Context, shortID string) (string, bool
 	defer fr.mu.RUnlock()
 	url, ok := fr.data[shortID]
 	return url, ok
+}
+
+func (fr *FileRepository) GetUserURLs(ctx context.Context, userID string) ([]UserURL, error) {
+	if userID == "" {
+		return nil, nil
+	}
+
+	fr.mu.RLock()
+	defer fr.mu.RUnlock()
+
+	m, ok := fr.userIndex[userID]
+	if !ok || len(m) == 0 {
+		return nil, nil
+	}
+
+	res := make([]UserURL, 0, len(m))
+	for shortID, originalURL := range m {
+		res = append(res, UserURL{
+			ShortID:     shortID,
+			OriginalURL: originalURL,
+		})
+	}
+	return res, nil
 }

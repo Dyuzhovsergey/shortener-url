@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
@@ -232,7 +233,17 @@ func (srv *HTTPServer) handleUserURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	base := strings.TrimRight(srv.baseURL, "/")
+	resp := make([]model.UserURLResponse, 0, len(userURLs))
+
+	for _, u := range userURLs {
+		resp = append(resp, model.UserURLResponse{
+			ShortURL:    base + "/" + u.ShortID,
+			OriginalURL: u.OriginalURL,
+		})
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(userURLs)
+	_ = json.NewEncoder(w).Encode(resp)
 }
