@@ -92,6 +92,7 @@ func TestHandleGet(t *testing.T) {
 	svc := service.NewShorterService(repo, cfg)
 
 	logger := zap.NewNop()
+	var testUser string = "test-user"
 
 	db := &fakeDB{err: nil}
 
@@ -99,7 +100,7 @@ func TestHandleGet(t *testing.T) {
 
 	shortID := "test123"
 	original := "https://example.com"
-	repo.Save(context.Background(), shortID, original)
+	repo.Save(context.Background(), shortID, original, testUser)
 
 	req := httptest.NewRequest(http.MethodGet, "/"+shortID, nil)
 	rec := httptest.NewRecorder()
