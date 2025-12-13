@@ -9,6 +9,8 @@ import (
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 )
 
+const testUser = "test-user"
+
 // makeTestConfig — конфигурация для тестов.
 func makeTestConfig() *config.ShortenerConfig {
 	return &config.ShortenerConfig{
@@ -113,7 +115,7 @@ func TestGetOriginalURL(t *testing.T) {
 	original := "https://go.dev"
 
 	// сохраняем напрямую в репозиторий
-	if err := repo.Save(context.Background(), shortID, original); err != nil {
+	if err := repo.Save(context.Background(), shortID, original, testUser); err != nil {
 		t.Fatalf("cannot save to repo: %v", err)
 	}
 

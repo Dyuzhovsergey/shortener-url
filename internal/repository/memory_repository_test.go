@@ -7,6 +7,8 @@ import (
 	"testing"
 )
 
+const TestUser = "test-user"
+
 // TestMemoryRepository_SaveAndGet проверяет, что сохранённое значение можно получить.
 func TestMemoryRepository_SaveAndGet(t *testing.T) {
 	repo := NewMemoryRepository()
@@ -14,7 +16,7 @@ func TestMemoryRepository_SaveAndGet(t *testing.T) {
 	shortID := "abc123"
 	original := "https://example.com"
 
-	if err := repo.Save(context.Background(), shortID, original); err != nil {
+	if err := repo.Save(context.Background(), shortID, original, TestUser); err != nil {
 		t.Fatalf("unexpected error on Save: %v", err)
 	}
 
@@ -45,10 +47,10 @@ func TestMemoryRepository_Overwrite(t *testing.T) {
 	url1 := "https://example.com/1"
 	url2 := "https://example.com/2"
 
-	if err := repo.Save(context.Background(), shortID, url1); err != nil {
+	if err := repo.Save(context.Background(), shortID, url1, TestUser); err != nil {
 		t.Fatalf("unexpected error on first Save: %v", err)
 	}
-	if err := repo.Save(context.Background(), shortID, url2); err != nil {
+	if err := repo.Save(context.Background(), shortID, url2, TestUser); err != nil {
 		t.Fatalf("unexpected error on second Save: %v", err)
 	}
 
@@ -77,7 +79,7 @@ func TestMemoryRepository_ConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < perGoroutine; i++ {
 				id := "id-" + strconv.Itoa(g*perGoroutine+i)
-				_ = repo.Save(context.Background(), id, "https://example.com/"+id)
+				_ = repo.Save(context.Background(), id, "https://example.com/"+id, TestUser)
 			}
 		}(g)
 	}
@@ -94,5 +96,4 @@ func TestMemoryRepository_ConcurrentAccess(t *testing.T) {
 	}
 
 	wg.Wait()
-	// если здесь нет паники и гонок при запуске с -race, всё ок
 }
