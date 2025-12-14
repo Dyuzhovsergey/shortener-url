@@ -18,6 +18,8 @@ import (
 	"github.com/Dyuzhovsergey/shortener-url/internal/service"
 )
 
+const testUser = "test-user"
+
 type fakeDB struct {
 	err error
 }
@@ -92,7 +94,6 @@ func TestHandleGet(t *testing.T) {
 	svc := service.NewShorterService(repo, cfg)
 
 	logger := zap.NewNop()
-	var testUser string = "test-user"
 
 	db := &fakeDB{err: nil}
 
