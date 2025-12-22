@@ -96,3 +96,19 @@ func (r *PostgresRepository) GetUserURLs(ctx context.Context, userID string) ([]
 	}
 	return res, nil
 }
+
+func (r *PostgresRepository) DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error {
+	if userID == "" || len(shortIDs) == 0 {
+		return nil
+	}
+
+	const q = `
+		UPDATE short_urls
+		SET is_deleted = TRUE
+		WHERE user_id = $1
+		  AND short_id = ANY($2)
+		  AND is_deleted = FALSE;
+	`
+	_, err := r.db.ExecContext(ctx, q, userID, shortIDs)
+	return err
+}
