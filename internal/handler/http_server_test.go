@@ -297,14 +297,28 @@ func TestHandleDeleteUserURLs_AcceptsAndEventuallyGone(t *testing.T) {
 		getRec := httptest.NewRecorder()
 		srv.Router().ServeHTTP(getRec, getReq)
 
-		if getRec.Code == http.StatusGone {
+		getRes := getRec.Result()
+		func() {
+			defer getRes.Body.Close()
+
+			if getRes.StatusCode == http.StatusGone {
+				return
+			}
+
+			if time.Now().After(deadline) {
+				b, _ := io.ReadAll(getRes.Body)
+				t.Fatalf(
+					"expected eventually 410 Gone, last=%d body=%q",
+					getRes.StatusCode,
+					string(b),
+				)
+			}
+		}()
+
+		if getRes.StatusCode == http.StatusGone {
 			break
 		}
-		if time.Now().After(deadline) {
-			b, _ := io.ReadAll(getRec.Result().Body)
-			defer getRec.Result().Body.Close()
-			t.Fatalf("expected eventually 410 Gone, last=%d body=%q", getRec.Code, string(b))
-		}
+
 		time.Sleep(20 * time.Millisecond)
 	}
 }
