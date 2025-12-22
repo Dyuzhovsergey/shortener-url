@@ -31,7 +31,6 @@ func (r *PostgresRepository) Save(ctx context.Context, shortID, originalURL, use
 		return err
 	}
 
-	// если вернулся НЕ наш shortID — значит original_url уже был в базе
 	if returnedShortID != shortID {
 		return &ErrOriginalAlreadyExists{ShortID: returnedShortID}
 	}

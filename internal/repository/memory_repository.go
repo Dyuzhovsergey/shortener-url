@@ -112,13 +112,15 @@ func (repo *MemoryRepository) DeleteUserURLs(ctx context.Context, userID string,
 		if !ok {
 			continue
 		}
-		// удалять может только владелец
+
 		if rec.UserID != userID {
 			continue
 		}
+
 		if rec.Deleted {
 			continue
 		}
+
 		rec.Deleted = true
 		repo.data[id] = rec
 	}

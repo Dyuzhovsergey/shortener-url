@@ -87,7 +87,6 @@ func (svc *ShorterService) CreateShortURL(ctx context.Context, originalURL strin
 
 		_, ok, err := svc.repo.Get(ctx, shortID)
 		if err != nil {
-			// если БД/хранилище упало — отдаём ошибку наверх
 			return "", err
 		}
 		if !ok {
@@ -108,14 +107,12 @@ func (svc *ShorterService) CreateShortURL(ctx context.Context, originalURL strin
 	if err := svc.repo.Save(ctx, shortID, originalURL, userID); err != nil {
 		var dup *repository.ErrOriginalAlreadyExists
 		if errors.As(err, &dup) {
-			// URL уже есть в хранилище — строим существующую короткую
 			existingShortURL := baseURL + "/" + dup.ShortID
 			return existingShortURL, ErrAlreadyExists
 		}
 		return "", err
 	}
 
-	// Успешно создали новую
 	shortURL := baseURL + "/" + shortID
 
 	return shortURL, nil
@@ -149,7 +146,6 @@ func (svc *ShorterService) GetUserURLs(ctx context.Context) ([]repository.UserUR
 }
 
 // CreateShortURLBatch — обрабатывает батч URL'ов.
-// На каждый originalURL создаёт shortID, сохраняет через repo и возвращает список результатов
 func (svc *ShorterService) CreateShortURLBatch(ctx context.Context, baseURL string, items []BatchItem) ([]BatchResult, error) {
 	if len(items) == 0 {
 		return nil, errors.New("empty batch")
@@ -188,8 +184,7 @@ func (svc *ShorterService) DeleteUserURLsAsync(ctx context.Context, shortIDs []s
 	case svc.deleteCh <- deleteTask{userID: userID, shortIDs: cp}:
 		return nil
 	default:
-		// очередь переполнена — err 503/500
-		return ErrDeleteQueueFull
+		return ErrDeleteQueueFull // err 503/500
 	}
 }
 

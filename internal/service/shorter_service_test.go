@@ -48,7 +48,7 @@ func TestCreateShortURL_Valid(t *testing.T) {
 		t.Errorf("short URL too short: %s", shortURL)
 	}
 
-	// Проверим, что ссылка сохранилась в репозитории
+	// Проверяем, что ссылка сохранилась в репозитории
 	id := shortURL[len(baseURL)+1:]
 	got, ok, err := repo.Get(context.Background(), id)
 	if err != nil {
