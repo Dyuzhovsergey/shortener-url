@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -21,7 +22,7 @@ func TestPostgresRepository_Save_OK(t *testing.T) {
 
 	rows := sqlmock.NewRows([]string{"short_id"}).AddRow(shortID)
 
-	// Используем ExpectQuery, потому что внутри Save: QueryRowContext + RETURNING
+	// FIX: ExpectQuery, потому что Save использует QueryRowContext + RETURNING.
 	mock.ExpectQuery(`(?s)INSERT INTO short_urls`).
 		WithArgs(shortID, original, testUser).
 		WillReturnRows(rows)
@@ -45,6 +46,7 @@ func TestPostgresRepository_Save_Duplicate(t *testing.T) {
 
 	rows := sqlmock.NewRows([]string{"short_id"}).AddRow(existingShortID)
 
+	// FIX: возвращаем existingShortID, отличный от newShortID -> repo.Save должен вернуть ErrOriginalAlreadyExists.
 	mock.ExpectQuery(`(?s)INSERT INTO short_urls`).
 		WithArgs(newShortID, original, testUser).
 		WillReturnRows(rows)
@@ -69,15 +71,42 @@ func TestPostgresRepository_Get_Found(t *testing.T) {
 	shortID := "abc123"
 	original := "https://example.com"
 
-	rows := sqlmock.NewRows([]string{"original_url"}).AddRow(original)
+	// FIX: теперь Get читает original_url + is_deleted, поэтому 2 колонки.
+	rows := sqlmock.NewRows([]string{"original_url", "is_deleted"}).
+		AddRow(original, false)
 
-	mock.ExpectQuery(`(?s)SELECT original_url`).
+	mock.ExpectQuery(`(?s)SELECT original_url,\s*is_deleted`).
 		WithArgs(shortID).
 		WillReturnRows(rows)
 
-	got, ok := repo.Get(context.Background(), shortID)
+	got, ok, err := repo.Get(context.Background(), shortID)
+	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, original, got)
+
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestPostgresRepository_Get_Deleted(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := NewPostgresRepository(db)
+
+	shortID := "del123"
+
+	// FIX: deleted=true => ok=true, err=ErrDeleted, original можно вернуть пустым.
+	rows := sqlmock.NewRows([]string{"original_url", "is_deleted"}).
+		AddRow("https://example.com/deleted", true)
+
+	mock.ExpectQuery(`(?s)SELECT original_url,\s*is_deleted`).
+		WithArgs(shortID).
+		WillReturnRows(rows)
+
+	_, ok, err := repo.Get(context.Background(), shortID)
+	require.True(t, ok)
+	require.True(t, errors.Is(err, ErrDeleted), "expected ErrDeleted, got: %v", err)
 
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -91,13 +120,37 @@ func TestPostgresRepository_Get_NotFound(t *testing.T) {
 
 	shortID := "unknown"
 
-	mock.ExpectQuery(`(?s)SELECT original_url`).
+	// FIX: Get делает SELECT original_url, is_deleted
+	mock.ExpectQuery(`(?s)SELECT original_url,\s*is_deleted`).
 		WithArgs(shortID).
 		WillReturnError(sql.ErrNoRows)
 
-	got, ok := repo.Get(context.Background(), shortID)
+	got, ok, err := repo.Get(context.Background(), shortID)
+	require.NoError(t, err) // FIX: по твоему коду ErrNoRows -> err=nil
 	require.False(t, ok)
 	require.Empty(t, got)
+
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestPostgresRepository_DeleteUserURLs(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := NewPostgresRepository(db)
+
+	shortIDs := []string{"a1", "b2", "c3"}
+
+	// FIX: внутри DeleteUserURLs используется ExecContext с ANY($2),
+	// драйвер обычно принимает массив как отдельный аргумент.
+	// В sqlmock проще матчить второй аргумент через AnyArg().
+	mock.ExpectExec(`(?s)UPDATE short_urls`).
+		WithArgs(testUser, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, int64(len(shortIDs))))
+
+	err = repo.DeleteUserURLs(context.Background(), testUser, shortIDs)
+	require.NoError(t, err)
 
 	require.NoError(t, mock.ExpectationsWereMet())
 }
