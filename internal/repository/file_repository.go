@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"strconv"
 	"sync"
@@ -23,15 +22,14 @@ type FileRepository struct {
 	mu sync.RWMutex
 
 	data      map[string]string            // shortID -> originalURL
-	reverse   map[string]string            // originalURL -> shortID (для быстрого поиска дубликатов)
+	reverse   map[string]string            // originalURL -> shortID
 	userIndex map[string]map[string]string // userID -> (shortID -> originalURL)
 	deleted   map[string]bool              // shortID -> is_deleted
 
-	records  []urlRecord // то, что пишем в файл
+	records  []urlRecord
 	filePath string
 }
 
-// NewFileRepository создаёт файловый репозиторий и загружает данные из файла, если он есть.
 func NewFileRepository(path string) (*FileRepository, error) {
 	fr := &FileRepository{
 		data:      make(map[string]string),
@@ -42,7 +40,6 @@ func NewFileRepository(path string) (*FileRepository, error) {
 		filePath:  path,
 	}
 
-	// открываем файл
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return fr, nil
@@ -60,23 +57,20 @@ func NewFileRepository(path string) (*FileRepository, error) {
 		return fr, nil
 	}
 
-	// читаем JSON-массив
-	body, err := io.ReadAll(f)
-	if err != nil {
-		return nil, err
-	}
-
 	var records []urlRecord
-	if err := json.Unmarshal(body, &records); err != nil {
+	dec := json.NewDecoder(f)
+	if err := dec.Decode(&records); err != nil {
 		return nil, err
 	}
 
-	// наполняем мапу и внутренний слайс
-	// восстанавливаем индексы
+	// восстанавливаем индексы из файла
 	for _, rec := range records {
 		fr.records = append(fr.records, rec)
+
 		fr.data[rec.ShortID] = rec.OriginalURL
 		fr.reverse[rec.OriginalURL] = rec.ShortID
+
+		fr.deleted[rec.ShortID] = rec.IsDeleted
 
 		if rec.UserID != "" {
 			m, ok := fr.userIndex[rec.UserID]
@@ -86,30 +80,33 @@ func NewFileRepository(path string) (*FileRepository, error) {
 			}
 			m[rec.ShortID] = rec.OriginalURL
 		}
-		fr.deleted[rec.ShortID] = rec.IsDeleted
 	}
 
 	return fr, nil
 }
 
-// Save сохраняет оригинальный URL по shortID и перезаписывает файл.
+// Save сохраняет originalURL по shortID и userID.
 func (fr *FileRepository) Save(ctx context.Context, shortID, originalURL, userID string) error {
+	_ = ctx
+
 	fr.mu.Lock()
 	defer fr.mu.Unlock()
 
-	// 1. Если по этому shortID уже был другой URL — подчистим reverse
-	if oldURL, ok := fr.data[shortID]; ok && oldURL != originalURL {
-		delete(fr.reverse, oldURL)
-	}
-
-	// 2. Проверяем, не существует ли уже такой originalURL
+	// 1) Если originalURL уже существует — конфликт
 	if existingShortID, ok := fr.reverse[originalURL]; ok && existingShortID != shortID {
 		return &ErrOriginalAlreadyExists{ShortID: existingShortID}
 	}
 
-	// 3) сохраняем в индексы
+	// 2) Если shortID уже был и указывал на другой URL — чистим reverse у старого URL
+	if oldURL, ok := fr.data[shortID]; ok && oldURL != originalURL {
+		delete(fr.reverse, oldURL)
+	}
+
+	// 3) сохраняем индексы
 	fr.data[shortID] = originalURL
 	fr.reverse[originalURL] = shortID
+	fr.deleted[shortID] = false
+
 	if userID != "" {
 		m, ok := fr.userIndex[userID]
 		if !ok {
@@ -128,41 +125,30 @@ func (fr *FileRepository) Save(ctx context.Context, shortID, originalURL, userID
 		UserID:      userID,
 		IsDeleted:   false,
 	})
-	fr.deleted[shortID] = false
 
-	// 5) перезаписываем файл
-	f, err := os.OpenFile(fr.filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	enc := json.NewEncoder(f)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(fr.records); err != nil {
-		return err
-	}
-
-	return nil
+	return fr.rewriteFileLocked()
 }
 
-// Get возвращает оригинальный URL по shortID.
+// Get возвращает originalURL по shortID.
 func (fr *FileRepository) Get(ctx context.Context, shortID string) (string, bool, error) {
+	_ = ctx
+
 	fr.mu.RLock()
 	defer fr.mu.RUnlock()
 
-	url, ok := fr.data[shortID]
+	original, ok := fr.data[shortID]
 	if !ok {
 		return "", false, nil
 	}
 	if fr.deleted[shortID] {
 		return "", true, ErrDeleted
 	}
-	return url, true, nil
+	return original, true, nil
 }
 
-
 func (fr *FileRepository) GetUserURLs(ctx context.Context, userID string) ([]UserURL, error) {
+	_ = ctx
+
 	if userID == "" {
 		return nil, nil
 	}
@@ -174,11 +160,25 @@ func (fr *FileRepository) GetUserURLs(ctx context.Context, userID string) ([]Use
 	if !ok || len(m) == 0 {
 		return nil, nil
 	}
-	if fr.deleted[shortID] {
-	continue
+
+	res := make([]UserURL, 0, len(m))
+	for shortID, originalURL := range m {
+		if fr.deleted[shortID] {
+			continue
+		}
+		res = append(res, UserURL{
+			ShortID:     shortID,
+			OriginalURL: originalURL,
+		})
+	}
+
+	return res, nil
 }
 
+// DeleteUserURLs помечает ссылки удалёнными
 func (fr *FileRepository) DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error {
+	_ = ctx
+
 	if userID == "" || len(shortIDs) == 0 {
 		return nil
 	}
@@ -191,7 +191,7 @@ func (fr *FileRepository) DeleteUserURLs(ctx context.Context, userID string, sho
 		return nil
 	}
 
-	// помечаем удалёнными в индексе
+	// 1) помечаем deleted в map
 	for _, id := range shortIDs {
 		if _, ok := owned[id]; !ok {
 			continue
@@ -199,7 +199,7 @@ func (fr *FileRepository) DeleteUserURLs(ctx context.Context, userID string, sho
 		fr.deleted[id] = true
 	}
 
-	// синхронизируем records (чтобы пережить рестарт)
+	// 2) синхронизируем records
 	for i := range fr.records {
 		id := fr.records[i].ShortID
 		if fr.deleted[id] {
@@ -207,7 +207,11 @@ func (fr *FileRepository) DeleteUserURLs(ctx context.Context, userID string, sho
 		}
 	}
 
-	// перезаписываем файл
+	return fr.rewriteFileLocked()
+}
+
+// rewriteFileLocked перезаписывает файл текущими fr.records.
+func (fr *FileRepository) rewriteFileLocked() error {
 	f, err := os.OpenFile(fr.filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
@@ -217,16 +221,4 @@ func (fr *FileRepository) DeleteUserURLs(ctx context.Context, userID string, sho
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
 	return enc.Encode(fr.records)
-}
-
-
-
-	res := make([]UserURL, 0, len(m))
-	for shortID, originalURL := range m {
-		res = append(res, UserURL{
-			ShortID:     shortID,
-			OriginalURL: originalURL,
-		})
-	}
-	return res, nil
 }

@@ -4,6 +4,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/Dyuzhovsergey/shortener-url/internal/middleware"
+	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 
 	"github.com/Dyuzhovsergey/shortener-url/internal/model"
 	"github.com/Dyuzhovsergey/shortener-url/internal/service"
@@ -64,7 +66,16 @@ func (srv *HTTPServer) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	originalURL, ok := srv.shorter.GetOriginalURL(r.Context(), id)
+	originalURL, ok, err := srv.shorter.GetOriginalURL(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, repository.ErrDeleted) {
+			w.WriteHeader(http.StatusGone) // 410
+			return
+		}
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
 	if !ok {
 		http.Error(w, "URL not found", http.StatusBadRequest)
 		return

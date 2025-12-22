@@ -102,8 +102,9 @@ func (svc *ShorterService) CreateShortURL(ctx context.Context, originalURL strin
 }
 
 // GetOriginalURL — возвращает оригинальный URL по shortID
-func (svc *ShorterService) GetOriginalURL(ctx context.Context, shortID string) (string, bool) {
-	return svc.repo.Get(ctx, strings.TrimSpace(shortID))
+func (svc *ShorterService) GetOriginalURL(ctx context.Context, shortID string) (string, bool, error) {
+	shortID = strings.TrimSpace(shortID)
+	return svc.repo.Get(ctx, shortID)
 }
 
 // generateID — генерирует случайный shortID.
