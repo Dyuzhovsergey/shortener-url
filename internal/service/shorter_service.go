@@ -70,6 +70,8 @@ func (svc *ShorterService) CreateShortURL(ctx context.Context, originalURL strin
 		return "", errors.New("unsupported URL scheme")
 	}
 
+	baseURL = strings.TrimRight(baseURL, "/")
+
 	var shortID string
 	for i := 0; i < maxAttempts; i++ {
 		shortID = svc.generateID()
