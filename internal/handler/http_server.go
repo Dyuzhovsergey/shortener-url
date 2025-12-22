@@ -53,6 +53,7 @@ func (srv *HTTPServer) Router() http.Handler {
 	r.Post("/api/shorten", srv.handleAPIPost)
 	r.Get("/ping", srv.handlePing)
 	r.Post("/api/shorten/batch", srv.handleAPIPostBatch)
+	r.Delete("/api/user/urls", srv.handleUserURLsDelete)
 	r.Get("/api/user/urls", srv.handleUserURLs)
 	r.Get("/{id}", srv.handleGet)
 	return r
@@ -257,4 +258,31 @@ func (srv *HTTPServer) handleUserURLs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (srv *HTTPServer) handleUserURLsDelete(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.UserIDFromContext(r.Context())
+	if !ok || userID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var shortIDs []string
+	if err := json.NewDecoder(r.Body).Decode(&shortIDs); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if len(shortIDs) == 0 {
+		// по ТЗ “пустые батчи не отправлять”, но если пришло — считаем 400
+		http.Error(w, "empty list", http.StatusBadRequest)
+		return
+	}
+
+	if err := srv.shorter.DeleteUserURLsAsync(r.Context(), shortIDs); err != nil {
+		// можно различать ошибки, но достаточно 500/503
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusAccepted) // 202
 }
