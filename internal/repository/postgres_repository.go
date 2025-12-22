@@ -40,22 +40,26 @@ func (r *PostgresRepository) Save(ctx context.Context, shortID, originalURL, use
 }
 
 // Get возвращает оригинальный URL по shortID.
-func (r *PostgresRepository) Get(ctx context.Context, shortID string) (string, bool) {
+func (r *PostgresRepository) Get(ctx context.Context, shortID string) (string, bool, error) {
 	const q = `
-		SELECT original_url
+		SELECT original_url, is_deleted
 		FROM short_urls
 		WHERE short_id = $1
 		LIMIT 1;
 	`
 	var original string
-	err := r.db.QueryRowContext(ctx, q, shortID).Scan(&original)
+	var deleted bool
+	err := r.db.QueryRowContext(ctx, q, shortID).Scan(&original, &deleted)
 	if err == sql.ErrNoRows {
-		return "", false
+		return "", false, nil
 	}
 	if err != nil {
-		return "", false
+		return "", false, err
 	}
-	return original, true
+	if deleted {
+		return "", true, ErrDeleted
+	}
+	return original, true, nil
 }
 
 // GetUserURLs возвращает shortID Users.
