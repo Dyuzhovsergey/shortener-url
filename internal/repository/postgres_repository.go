@@ -49,6 +49,7 @@ func (r *PostgresRepository) Get(ctx context.Context, shortID string) (string, b
 	`
 	var original string
 	var deleted bool
+
 	err := r.db.QueryRowContext(ctx, q, shortID).Scan(&original, &deleted)
 	if err == sql.ErrNoRows {
 		return "", false, nil
@@ -71,8 +72,10 @@ func (r *PostgresRepository) GetUserURLs(ctx context.Context, userID string) ([]
 	const q = `
 		SELECT short_id, original_url
 		FROM short_urls
-		WHERE user_id = $1
+		WHERE user_id = $1 AND is_deleted = FALSE
+		ORDER BY short_id;
 	`
+
 	rows, err := r.db.QueryContext(ctx, q, userID)
 	if err != nil {
 		return nil, err
@@ -80,6 +83,7 @@ func (r *PostgresRepository) GetUserURLs(ctx context.Context, userID string) ([]
 	defer rows.Close()
 
 	var res []UserURL
+
 	for rows.Next() {
 		var u UserURL
 		if err := rows.Scan(&u.ShortID, &u.OriginalURL); err != nil {
