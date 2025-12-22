@@ -15,6 +15,7 @@ type urlRecord struct {
 	ShortID     string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
 	UserID      string `json:"user_id"`
+	IsDeleted   bool   `json:"is_deleted"`
 }
 
 // FileRepository — реализация Repository с сохранением на диск.
@@ -24,6 +25,7 @@ type FileRepository struct {
 	data      map[string]string            // shortID -> originalURL
 	reverse   map[string]string            // originalURL -> shortID (для быстрого поиска дубликатов)
 	userIndex map[string]map[string]string // userID -> (shortID -> originalURL)
+	deleted   map[string]bool              // shortID -> is_deleted
 
 	records  []urlRecord // то, что пишем в файл
 	filePath string
@@ -35,6 +37,7 @@ func NewFileRepository(path string) (*FileRepository, error) {
 		data:      make(map[string]string),
 		reverse:   make(map[string]string),
 		userIndex: make(map[string]map[string]string),
+		deleted:   make(map[string]bool),
 		records:   make([]urlRecord, 0),
 		filePath:  path,
 	}
@@ -83,6 +86,7 @@ func NewFileRepository(path string) (*FileRepository, error) {
 			}
 			m[rec.ShortID] = rec.OriginalURL
 		}
+		fr.deleted[rec.ShortID] = rec.IsDeleted
 	}
 
 	return fr, nil
@@ -122,9 +126,11 @@ func (fr *FileRepository) Save(ctx context.Context, shortID, originalURL, userID
 		ShortID:     shortID,
 		OriginalURL: originalURL,
 		UserID:      userID,
+		IsDeleted:   false,
 	})
+	fr.deleted[shortID] = false
 
-	// 5) перезаписываем файл (у тебя так и было)
+	// 5) перезаписываем файл
 	f, err := os.OpenFile(fr.filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
@@ -141,12 +147,20 @@ func (fr *FileRepository) Save(ctx context.Context, shortID, originalURL, userID
 }
 
 // Get возвращает оригинальный URL по shortID.
-func (fr *FileRepository) Get(ctx context.Context, shortID string) (string, bool) {
+func (fr *FileRepository) Get(ctx context.Context, shortID string) (string, bool, error) {
 	fr.mu.RLock()
 	defer fr.mu.RUnlock()
+
 	url, ok := fr.data[shortID]
-	return url, ok
+	if !ok {
+		return "", false, nil
+	}
+	if fr.deleted[shortID] {
+		return "", true, ErrDeleted
+	}
+	return url, true, nil
 }
+
 
 func (fr *FileRepository) GetUserURLs(ctx context.Context, userID string) ([]UserURL, error) {
 	if userID == "" {
@@ -160,6 +174,52 @@ func (fr *FileRepository) GetUserURLs(ctx context.Context, userID string) ([]Use
 	if !ok || len(m) == 0 {
 		return nil, nil
 	}
+	if fr.deleted[shortID] {
+	continue
+}
+
+func (fr *FileRepository) DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error {
+	if userID == "" || len(shortIDs) == 0 {
+		return nil
+	}
+
+	fr.mu.Lock()
+	defer fr.mu.Unlock()
+
+	owned, ok := fr.userIndex[userID]
+	if !ok || len(owned) == 0 {
+		return nil
+	}
+
+	// помечаем удалёнными в индексе
+	for _, id := range shortIDs {
+		if _, ok := owned[id]; !ok {
+			continue
+		}
+		fr.deleted[id] = true
+	}
+
+	// синхронизируем records (чтобы пережить рестарт)
+	for i := range fr.records {
+		id := fr.records[i].ShortID
+		if fr.deleted[id] {
+			fr.records[i].IsDeleted = true
+		}
+	}
+
+	// перезаписываем файл
+	f, err := os.OpenFile(fr.filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	return enc.Encode(fr.records)
+}
+
+
 
 	res := make([]UserURL, 0, len(m))
 	for shortID, originalURL := range m {

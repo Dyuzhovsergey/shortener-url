@@ -5,9 +5,15 @@ import (
 	"sync"
 )
 
+type memRec struct {
+	OriginalURL string
+	UserID      string
+	Deleted     bool
+}
+
 // MemoryRepository — реализация Repository в оперативной памяти.
 type MemoryRepository struct {
-	data      map[string]string            // shortID -> originalURL
+	data      map[string]memRec            // shortID -> record
 	reverse   map[string]string            // originalURL -> shortID
 	userIndex map[string]map[string]string // userID -> (shortID -> originalURL)
 	mu        sync.RWMutex
@@ -16,7 +22,7 @@ type MemoryRepository struct {
 // NewMemoryRepository — конструктор.
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		data:      make(map[string]string),
+		data:      make(map[string]memRec),
 		reverse:   make(map[string]string),
 		userIndex: make(map[string]map[string]string),
 	}
