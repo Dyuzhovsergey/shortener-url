@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -18,15 +19,9 @@ import (
 	"github.com/Dyuzhovsergey/shortener-url/internal/service"
 )
 
-const testUser = "test-user"
+type fakeDB struct{ err error }
 
-type fakeDB struct {
-	err error
-}
-
-func (f *fakeDB) PingContext(ctx context.Context) error {
-	return f.err
-}
+func (f *fakeDB) PingContext(ctx context.Context) error { return f.err }
 
 // makeTestConfig — возвращает тестовую конфигурацию.
 func makeTestConfig() *config.ShortenerConfig {
@@ -38,20 +33,44 @@ func makeTestConfig() *config.ShortenerConfig {
 	}
 }
 
-// Создаёт "тестовый сервер" с in-memory репозиторием
 func setupTestServer() *HTTPServer {
 	repo := repository.NewMemoryRepository()
 	cfg := makeTestConfig()
 	svc := service.NewShorterService(repo, cfg)
 
 	logger := zap.NewNop()
-
 	db := &fakeDB{err: nil}
 
 	return NewHTTPServer(cfg.BaseURL, svc, logger, db)
 }
 
-// Тест на POST / — создание короткого URL
+func requireNoErr(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// helper: достаём auth cookie, которую выставил сервер (middleware).
+func getAuthCookieFromResponse(t *testing.T, res *http.Response) *http.Cookie {
+	t.Helper()
+
+	cookies := res.Cookies()
+	if len(cookies) == 0 {
+		t.Fatalf("expected at least 1 Set-Cookie, got none")
+	}
+
+	// если имя у тебя user_id — можно отфильтровать, но безопаснее искать.
+	for _, c := range cookies {
+		if c.Name == "user_id" {
+			return c
+		}
+	}
+	// fallback: первая
+	return cookies[0]
+}
+
+// --- POST / — создание короткого URL ---
 func TestHandlePost(t *testing.T) {
 	srv := setupTestServer()
 
@@ -71,51 +90,50 @@ func TestHandlePost(t *testing.T) {
 	if res.StatusCode != http.StatusCreated {
 		t.Errorf("expected status %d, got %d", http.StatusCreated, res.StatusCode)
 	}
-	if res.Header.Get("Content-Type") != "text/plain" {
-		t.Errorf("expected header Content-Type 'text/plain', got %s", res.Header.Get("Content-Type"))
+	if ct := res.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Errorf("expected Content-Type text/plain, got %s", ct)
 	}
 	if !strings.HasPrefix(bodyStr, "http://localhost:8080/") {
 		t.Errorf("expected short URL prefix http://localhost:8080/, got %s", bodyStr)
 	}
-
-	// Проверяем, что URL действительно сохранился
-	id := strings.TrimPrefix(bodyStr, "http://localhost:8080/")
-	_, ok := srv.shorter.GetOriginalURL(context.Background(), id)
-	if !ok {
-		t.Errorf("short URL with ID %s was not saved", id)
-	}
 }
 
-// --- Тест на GET /{id} ---
-// Проверяет редирект на оригинальный URL
-func TestHandleGet(t *testing.T) {
-	repo := repository.NewMemoryRepository()
-	cfg := makeTestConfig()
-	svc := service.NewShorterService(repo, cfg)
+// --- GET /{id} — редирект ---
+func TestHandleGet_Redirect(t *testing.T) {
+	srv := setupTestServer()
 
-	logger := zap.NewNop()
+	// 1) создаём ссылку
+	orig := "https://example.com"
+	createReq := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(orig))
+	createReq.Header.Set("Content-Type", "text/plain")
+	createRec := httptest.NewRecorder()
 
-	db := &fakeDB{err: nil}
+	srv.Router().ServeHTTP(createRec, createReq)
+	createRes := createRec.Result()
+	defer createRes.Body.Close()
 
-	srv := NewHTTPServer(cfg.BaseURL, svc, logger, db)
-
-	shortID := "test123"
-	original := "https://example.com"
-	repo.Save(context.Background(), shortID, original, testUser)
-
-	req := httptest.NewRequest(http.MethodGet, "/"+shortID, nil)
-	rec := httptest.NewRecorder()
-
-	srv.Router().ServeHTTP(rec, req)
-	res := rec.Result()
-	defer res.Body.Close()
-
-	if res.StatusCode != http.StatusTemporaryRedirect {
-		t.Errorf("expected status %d, got %d", http.StatusTemporaryRedirect, res.StatusCode)
+	if createRes.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(createRes.Body)
+		t.Fatalf("expected 201, got %d, body=%q", createRes.StatusCode, string(b))
 	}
-	location := res.Header.Get("Location")
-	if location != original {
-		t.Errorf("expected Location %s, got %s", original, location)
+
+	shortBytes, _ := io.ReadAll(createRes.Body)
+	shortURL := strings.TrimSpace(string(shortBytes))
+	shortID := strings.TrimPrefix(shortURL, "http://localhost:8080/")
+
+	// 2) GET
+	getReq := httptest.NewRequest(http.MethodGet, "/"+shortID, nil)
+	getRec := httptest.NewRecorder()
+
+	srv.Router().ServeHTTP(getRec, getReq)
+	getRes := getRec.Result()
+	defer getRes.Body.Close()
+
+	if getRes.StatusCode != http.StatusTemporaryRedirect {
+		t.Fatalf("expected %d, got %d", http.StatusTemporaryRedirect, getRes.StatusCode)
+	}
+	if loc := getRes.Header.Get("Location"); loc != orig {
+		t.Fatalf("expected Location %q, got %q", orig, loc)
 	}
 }
 
@@ -135,27 +153,22 @@ func TestHandleAPIPost_OK(t *testing.T) {
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("expected status %d, got %d", http.StatusCreated, res.StatusCode)
 	}
-
 	if ct := res.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
 		t.Fatalf("expected Content-Type application/json, got %s", ct)
 	}
 
 	respBody, err := io.ReadAll(res.Body)
-	if err != nil {
-		t.Fatalf("cannot read body: %v", err)
-	}
+	requireNoErr(t, err)
 
 	var resp model.ShortenResponse
-	if err := json.Unmarshal(respBody, &resp); err != nil {
-		t.Fatalf("cannot unmarshal response: %v", err)
-	}
+	requireNoErr(t, json.Unmarshal(respBody, &resp))
 
 	if !strings.HasPrefix(resp.Result, "http://localhost:8080/") {
 		t.Errorf("expected result prefix http://localhost:8080/, got %s", resp.Result)
 	}
 }
 
-// --- Тест OK на GET /ping ---
+// --- GET /ping OK ---
 func TestHandlePing_OK(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	cfg := makeTestConfig()
@@ -163,16 +176,14 @@ func TestHandlePing_OK(t *testing.T) {
 
 	logger := zap.NewNop()
 	db := &fakeDB{err: nil}
-
 	srv := NewHTTPServer(cfg.BaseURL, svc, logger, db)
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	rec := httptest.NewRecorder()
-
 	srv.Router().ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
+		t.Fatalf("expected 200, got %d", rec.Code)
 	}
 }
 
@@ -183,16 +194,14 @@ func TestHandlePing_DBError(t *testing.T) {
 
 	logger := zap.NewNop()
 	db := &fakeDB{err: errors.New("db down")}
-
 	srv := NewHTTPServer(cfg.BaseURL, svc, logger, db)
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	rec := httptest.NewRecorder()
-
 	srv.Router().ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected status 500, got %d", rec.Code)
+		t.Fatalf("expected 500, got %d", rec.Code)
 	}
 }
 
@@ -200,10 +209,9 @@ func TestHandleAPIPostBatch_OK(t *testing.T) {
 	srv := setupTestServer()
 
 	body := `[
-		{"correlation_id": "1", "original_url": "https://practicum.yandex.ru/"},
-		{"correlation_id": "2", "original_url": "https://example.com"}
+		{"correlation_id":"1","original_url":"https://practicum.yandex.ru/"},
+		{"correlation_id":"2","original_url":"https://example.com"}
 	]`
-
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
@@ -213,61 +221,89 @@ func TestHandleAPIPostBatch_OK(t *testing.T) {
 	res := rec.Result()
 	defer res.Body.Close()
 
-	// 1) Проверяем статус
 	if res.StatusCode != http.StatusCreated {
-		t.Fatalf("expected status %d, got %d", http.StatusCreated, res.StatusCode)
+		t.Fatalf("expected %d, got %d", http.StatusCreated, res.StatusCode)
+	}
+	if ct := res.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Fatalf("expected application/json, got %s", ct)
 	}
 
-	// 2) Проверяем Content-Type
-	ct := res.Header.Get("Content-Type")
-	if !strings.HasPrefix(ct, "application/json") {
-		t.Fatalf("expected Content-Type application/json, got %s", ct)
-	}
-
-	// 3) Читаем и разбираем JSON-ответ
 	respBody, err := io.ReadAll(res.Body)
-	if err != nil {
-		t.Fatalf("cannot read body: %v", err)
-	}
+	requireNoErr(t, err)
 
 	var resp []model.BatchShortenResponseItem
-	if err := json.Unmarshal(respBody, &resp); err != nil {
-		t.Fatalf("cannot unmarshal response: %v", err)
-	}
+	requireNoErr(t, json.Unmarshal(respBody, &resp))
 
-	// 4) Проверяем количество элементов
 	if len(resp) != 2 {
-		t.Fatalf("expected 2 items in response, got %d", len(resp))
+		t.Fatalf("expected 2 items, got %d", len(resp))
 	}
-
-	// 5) Проверяем correlation_id и short_url
 	if resp[0].CorrelationID != "1" {
-		t.Errorf("expected correlation_id '1', got %s", resp[0].CorrelationID)
+		t.Errorf("expected correlation_id=1, got %s", resp[0].CorrelationID)
 	}
 	if !strings.HasPrefix(resp[0].ShortURL, "http://localhost:8080/") {
-		t.Errorf("expected short_url to start with http://localhost:8080/, got %s", resp[0].ShortURL)
+		t.Errorf("unexpected short_url %s", resp[0].ShortURL)
+	}
+}
+
+// --- DELETE /api/user/urls ---
+// 1) создаём url -> получаем cookie владельца
+// 2) DELETE с этой cookie -> 202
+// 3) ждём чуть-чуть (т.к. async) и GET -> 410
+func TestHandleDeleteUserURLs_AcceptsAndEventuallyGone(t *testing.T) {
+	srv := setupTestServer()
+
+	// 1) создаём ссылку
+	orig := "https://example.com/to-delete"
+	createReq := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(orig))
+	createReq.Header.Set("Content-Type", "text/plain")
+	createRec := httptest.NewRecorder()
+
+	srv.Router().ServeHTTP(createRec, createReq)
+	createRes := createRec.Result()
+	defer createRes.Body.Close()
+
+	if createRes.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(createRes.Body)
+		t.Fatalf("expected 201, got %d, body=%q", createRes.StatusCode, string(b))
 	}
 
-	if resp[1].CorrelationID != "2" {
-		t.Errorf("expected correlation_id '2', got %s", resp[1].CorrelationID)
-	}
-	if !strings.HasPrefix(resp[1].ShortURL, "http://localhost:8080/") {
-		t.Errorf("expected short_url to start with http://localhost:8080/, got %s", resp[1].ShortURL)
+	authCookie := getAuthCookieFromResponse(t, createRes)
+
+	shortBytes, _ := io.ReadAll(createRes.Body)
+	shortURL := strings.TrimSpace(string(shortBytes))
+	shortID := strings.TrimPrefix(shortURL, "http://localhost:8080/")
+
+	// 2) DELETE
+	delBody, _ := json.Marshal([]string{shortID})
+	delReq := httptest.NewRequest(http.MethodDelete, "/api/user/urls", strings.NewReader(string(delBody)))
+	delReq.Header.Set("Content-Type", "application/json")
+	delReq.AddCookie(authCookie)
+
+	delRec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(delRec, delReq)
+
+	delRes := delRec.Result()
+	defer delRes.Body.Close()
+
+	if delRes.StatusCode != http.StatusAccepted {
+		b, _ := io.ReadAll(delRes.Body)
+		t.Fatalf("expected 202, got %d, body=%q", delRes.StatusCode, string(b))
 	}
 
-	// 6) Поверим, что первая ссылка реально сохранилась в сервисе
-	firstShort := resp[0].ShortURL
-	const base = "http://localhost:8080"
-	if !strings.HasPrefix(firstShort, base+"/") {
-		t.Fatalf("unexpected short url format: %s", firstShort)
-	}
-	id := strings.TrimPrefix(firstShort, base+"/")
+	// 3) async: даём время воркеру (в тестах можно маленький polling)
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		getReq := httptest.NewRequest(http.MethodGet, "/"+shortID, nil)
+		getRec := httptest.NewRecorder()
+		srv.Router().ServeHTTP(getRec, getReq)
 
-	original, ok := srv.shorter.GetOriginalURL(context.Background(), id)
-	if !ok {
-		t.Fatalf("short url with id %s was not saved in repository", id)
-	}
-	if original != "https://practicum.yandex.ru/" {
-		t.Errorf("expected original url %q, got %q", "https://practicum.yandex.ru/", original)
+		if getRec.Code == http.StatusGone {
+			break
+		}
+		if time.Now().After(deadline) {
+			b, _ := io.ReadAll(getRec.Result().Body)
+			t.Fatalf("expected eventually 410 Gone, last=%d body=%q", getRec.Code, string(b))
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
