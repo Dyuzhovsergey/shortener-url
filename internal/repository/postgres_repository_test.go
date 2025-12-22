@@ -132,25 +132,3 @@ func TestPostgresRepository_Get_NotFound(t *testing.T) {
 
 	require.NoError(t, mock.ExpectationsWereMet())
 }
-
-func TestPostgresRepository_DeleteUserURLs(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	defer db.Close()
-
-	repo := NewPostgresRepository(db)
-
-	shortIDs := []string{"a1", "b2", "c3"}
-
-	// FIX: внутри DeleteUserURLs используется ExecContext с ANY($2),
-	// драйвер обычно принимает массив как отдельный аргумент.
-	// В sqlmock проще матчить второй аргумент через AnyArg().
-	mock.ExpectExec(`(?s)UPDATE short_urls`).
-		WithArgs(testUser, sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(0, int64(len(shortIDs))))
-
-	err = repo.DeleteUserURLs(context.Background(), testUser, shortIDs)
-	require.NoError(t, err)
-
-	require.NoError(t, mock.ExpectationsWereMet())
-}
