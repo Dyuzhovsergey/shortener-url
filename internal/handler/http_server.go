@@ -13,9 +13,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/Dyuzhovsergey/shortener-url/internal/middleware"
-	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
-
 	"github.com/Dyuzhovsergey/shortener-url/internal/model"
+	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 	"github.com/Dyuzhovsergey/shortener-url/internal/service"
 )
 
@@ -260,6 +259,7 @@ func (srv *HTTPServer) handleUserURLs(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// DELETE /api/user/urls
 func (srv *HTTPServer) handleUserURLsDelete(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.UserIDFromContext(r.Context())
 	if !ok || userID == "" {

@@ -13,58 +13,66 @@ type memRec struct {
 
 // MemoryRepository — реализация Repository в оперативной памяти.
 type MemoryRepository struct {
-	data      map[string]memRec            // shortID -> record
-	reverse   map[string]string            // originalURL -> shortID
-	userIndex map[string]map[string]string // userID -> (shortID -> originalURL)
+	data      map[string]memRec              // shortID -> record
+	reverse   map[string]string              // originalURL -> shortID
+	userIndex map[string]map[string]struct{} // userID -> set(shortID)
 	mu        sync.RWMutex
 }
 
-// NewMemoryRepository — конструктор.
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
 		data:      make(map[string]memRec),
 		reverse:   make(map[string]string),
-		userIndex: make(map[string]map[string]string),
+		userIndex: make(map[string]map[string]struct{}),
 	}
 }
 
-// Save сохраняет оригинальный URL по shortID.
 func (repo *MemoryRepository) Save(ctx context.Context, shortID, originalURL, userID string) error {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 
-	// 1. Если по этому shortID уже есть другой URL — почистим reverse
-	if oldURL, ok := repo.data[shortID]; ok && oldURL != originalURL {
-		delete(repo.reverse, oldURL)
+	// если shortID уже был и указывал на другой URL — чистим reverse у старого URL
+	if old, ok := repo.data[shortID]; ok && old.OriginalURL != originalURL {
+		delete(repo.reverse, old.OriginalURL)
 	}
 
-	// 2. Проверяем, не существует ли уже такой originalURL
+	// если originalURL уже есть -> конфликт
 	if existingShortID, ok := repo.reverse[originalURL]; ok && existingShortID != shortID {
 		return &ErrOriginalAlreadyExists{ShortID: existingShortID}
 	}
 
-	// 3. Обновляем обе мапы
-	repo.data[shortID] = originalURL
+	// записываем/обновляем
+	repo.data[shortID] = memRec{
+		OriginalURL: originalURL,
+		UserID:      userID,
+		Deleted:     false,
+	}
 	repo.reverse[originalURL] = shortID
 
 	if userID != "" {
-		m, ok := repo.userIndex[userID]
+		set, ok := repo.userIndex[userID]
 		if !ok {
-			m = make(map[string]string)
-			repo.userIndex[userID] = m
+			set = make(map[string]struct{})
+			repo.userIndex[userID] = set
 		}
-		m[shortID] = originalURL
+		set[shortID] = struct{}{}
 	}
 
 	return nil
 }
 
-// Get возвращает оригинальный URL по shortID.
-func (repo *MemoryRepository) Get(ctx context.Context, shortID string) (string, bool) {
+func (repo *MemoryRepository) Get(ctx context.Context, shortID string) (string, bool, error) {
 	repo.mu.RLock()
 	defer repo.mu.RUnlock()
-	url, ok := repo.data[shortID]
-	return url, ok
+
+	rec, ok := repo.data[shortID]
+	if !ok {
+		return "", false, nil
+	}
+	if rec.Deleted {
+		return "", true, ErrDeleted
+	}
+	return rec.OriginalURL, true, nil
 }
 
 func (repo *MemoryRepository) GetUserURLs(ctx context.Context, userID string) ([]UserURL, error) {
@@ -75,17 +83,44 @@ func (repo *MemoryRepository) GetUserURLs(ctx context.Context, userID string) ([
 	repo.mu.RLock()
 	defer repo.mu.RUnlock()
 
-	m, ok := repo.userIndex[userID]
-	if !ok || len(m) == 0 {
+	set, ok := repo.userIndex[userID]
+	if !ok || len(set) == 0 {
 		return nil, nil
 	}
 
-	res := make([]UserURL, 0, len(m))
-	for shortID, originalURL := range m {
-		res = append(res, UserURL{
-			ShortID:     shortID,
-			OriginalURL: originalURL,
-		})
+	res := make([]UserURL, 0, len(set))
+	for shortID := range set {
+		rec, ok := repo.data[shortID]
+		if !ok || rec.Deleted {
+			continue
+		}
+		res = append(res, UserURL{ShortID: shortID, OriginalURL: rec.OriginalURL})
 	}
 	return res, nil
+}
+
+func (repo *MemoryRepository) DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error {
+	if userID == "" || len(shortIDs) == 0 {
+		return nil
+	}
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+
+	for _, id := range shortIDs {
+		rec, ok := repo.data[id]
+		if !ok {
+			continue
+		}
+		// удалять может только владелец
+		if rec.UserID != userID {
+			continue
+		}
+		if rec.Deleted {
+			continue
+		}
+		rec.Deleted = true
+		repo.data[id] = rec
+	}
+	return nil
 }

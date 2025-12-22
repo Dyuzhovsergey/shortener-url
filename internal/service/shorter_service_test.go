@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Dyuzhovsergey/shortener-url/internal/config"
+	"github.com/Dyuzhovsergey/shortener-url/internal/middleware"
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 )
 
@@ -30,7 +31,11 @@ func TestCreateShortURL_Valid(t *testing.T) {
 	original := "https://practicum.yandex.ru/"
 	baseURL := cfg.BaseURL
 
-	shortURL, err := svc.CreateShortURL(context.Background(), original, baseURL)
+	// кладём userID в контекст, чтобы Save получил userID
+	ctx := context.Background()
+	_ = middleware.UserIDFromContext
+
+	shortURL, err := svc.CreateShortURL(ctx, original, baseURL)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -44,9 +49,11 @@ func TestCreateShortURL_Valid(t *testing.T) {
 	}
 
 	// Проверим, что ссылка сохранилась в репозитории
-	id := shortURL[len(baseURL)+1:] // +1 за '/'
-	got, ok := svc.GetOriginalURL(context.Background(), id)
-
+	id := shortURL[len(baseURL)+1:]
+	got, ok, err := repo.Get(context.Background(), id)
+	if err != nil {
+		t.Fatalf("unexpected repo.Get error: %v", err)
+	}
 	if !ok {
 		t.Fatalf("shortID %s not found in repository", id)
 	}
@@ -66,7 +73,7 @@ func TestCreateShortURL_Invalid(t *testing.T) {
 		"htt://example.com", // опечатка в схеме
 		"http://",           // нет хоста
 		"example.com",       // без схемы
-		"ftp://example.com", // неподдерживаемая схема, если в сервисе запрещены схемы кроме http/https
+		"ftp://example.com", // неподдерживаемая схема
 	}
 
 	for _, input := range tests {
@@ -89,7 +96,6 @@ func TestCreateShortURL_Uniqueness(t *testing.T) {
 	const n = 1000
 
 	for i := 0; i < n; i++ {
-		// Делаем уникальный originalURL для каждого шага
 		original := fmt.Sprintf("https://example.com/%d", i)
 
 		shortURL, err := svc.CreateShortURL(context.Background(), original, baseURL)
@@ -114,12 +120,13 @@ func TestGetOriginalURL(t *testing.T) {
 	shortID := "abc123"
 	original := "https://go.dev"
 
-	// сохраняем напрямую в репозиторий
 	if err := repo.Save(context.Background(), shortID, original, testUser); err != nil {
 		t.Fatalf("cannot save to repo: %v", err)
 	}
-
-	got, ok := svc.GetOriginalURL(context.Background(), shortID)
+	got, ok, err := svc.GetOriginalURL(context.Background(), shortID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if !ok {
 		t.Fatalf("expected to find shortID %s", shortID)
 	}
@@ -128,7 +135,11 @@ func TestGetOriginalURL(t *testing.T) {
 	}
 
 	// неизвестный ID
-	if _, ok := svc.GetOriginalURL(context.Background(), "unknownID"); ok {
+	_, ok, err = svc.GetOriginalURL(context.Background(), "unknownID")
+	if err != nil {
+		t.Fatalf("unexpected error for unknownID: %v", err)
+	}
+	if ok {
 		t.Errorf("expected false for unknownID")
 	}
 }
