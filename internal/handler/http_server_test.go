@@ -302,6 +302,7 @@ func TestHandleDeleteUserURLs_AcceptsAndEventuallyGone(t *testing.T) {
 		}
 		if time.Now().After(deadline) {
 			b, _ := io.ReadAll(getRec.Result().Body)
+			defer getRec.Result().Body.Close()
 			t.Fatalf("expected eventually 410 Gone, last=%d body=%q", getRec.Code, string(b))
 		}
 		time.Sleep(20 * time.Millisecond)
