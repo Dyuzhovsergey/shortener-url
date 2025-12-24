@@ -189,7 +189,70 @@ func (svc *ShorterService) DeleteUserURLsAsync(ctx context.Context, shortIDs []s
 }
 
 func (svc *ShorterService) deleteWorker() {
-	for task := range svc.deleteCh {
-		_ = svc.repo.DeleteUserURLs(context.Background(), task.userID, task.shortIDs)
+	const (
+		batchSize  = 100
+		flushEvery = 200 * time.Millisecond
+	)
+
+	// userID -> set(shortID)
+	pending := make(map[string]map[string]struct{})
+
+	flushUser := func(userID string) {
+		set := pending[userID]
+		if len(set) == 0 {
+			return
+		}
+
+		ids := make([]string, 0, len(set))
+		for id := range set {
+			ids = append(ids, id)
+		}
+
+		_ = svc.repo.DeleteUserURLs(context.Background(), userID, ids)
+		delete(pending, userID)
+	}
+
+	flushAll := func() {
+		for userID := range pending {
+			flushUser(userID)
+		}
+	}
+
+	t := time.NewTicker(flushEvery)
+	defer t.Stop()
+
+	for {
+		select {
+		case task, ok := <-svc.deleteCh:
+			if !ok {
+				flushAll()
+				return
+			}
+
+			if task.userID == "" || len(task.shortIDs) == 0 {
+				continue
+			}
+
+			set, ok := pending[task.userID]
+			if !ok {
+				set = make(map[string]struct{})
+				pending[task.userID] = set
+			}
+
+			for _, id := range task.shortIDs {
+				id = strings.TrimSpace(id)
+				if id == "" {
+					continue
+				}
+				set[id] = struct{}{}
+			}
+
+			if len(set) >= batchSize {
+				flushUser(task.userID)
+			}
+
+		case <-t.C:
+			flushAll()
+		}
 	}
 }
