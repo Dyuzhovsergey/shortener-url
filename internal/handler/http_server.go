@@ -101,7 +101,6 @@ func (srv *HTTPServer) handlePost(w http.ResponseWriter, r *http.Request) {
 
 	shortURL, err := srv.shorter.CreateShortURL(r.Context(), string(body), srv.baseURL)
 	if err != nil {
-		// 🔹 Если нам вернули непустой shortURL и ошибку — это как раз кейс "URL уже существовал".
 		if shortURL != "" {
 			w.Header().Set("Content-Type", "text/plain")
 			w.WriteHeader(http.StatusConflict) // 409
@@ -109,7 +108,6 @@ func (srv *HTTPServer) handlePost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// остальные ошибки — некорректный URL
 		http.Error(w, "Invalid URL format", http.StatusBadRequest)
 		return
 	}
@@ -136,7 +134,6 @@ func (srv *HTTPServer) handleAPIPost(w http.ResponseWriter, r *http.Request) {
 
 	shortURL, err := srv.shorter.CreateShortURL(r.Context(), req.URL, srv.baseURL)
 	if err != nil {
-		// Конфликт: shortURL не пустой + ошибка → URL уже есть в базе
 		if shortURL != "" {
 			resp := model.ShortenResponse{Result: shortURL}
 			w.Header().Set("Content-Type", "application/json")
@@ -163,7 +160,6 @@ func (srv *HTTPServer) handleAPIPost(w http.ResponseWriter, r *http.Request) {
 
 func (srv *HTTPServer) handlePing(w http.ResponseWriter, r *http.Request) {
 	if srv.db == nil {
-		// БД не настроена — считаем это 500
 		http.Error(w, "database not configured", http.StatusInternalServerError)
 		return
 	}
@@ -208,7 +204,7 @@ func (srv *HTTPServer) handleAPIPostBatch(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// формируем ответ для клиента
+	// ответ для клиента
 	resp := make([]model.BatchShortenResponseItem, 0, len(results))
 	for _, res := range results {
 		resp = append(resp, model.BatchShortenResponseItem{
@@ -273,14 +269,12 @@ func (srv *HTTPServer) handleUserURLsDelete(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if len(shortIDs) == 0 {
-		// по ТЗ “пустые батчи не отправлять”, но если пришло — считаем 400
-		http.Error(w, "empty list", http.StatusBadRequest)
+		http.Error(w, "empty list", http.StatusBadRequest) // 400
 		return
 	}
 
 	if err := srv.shorter.DeleteUserURLsAsync(r.Context(), shortIDs); err != nil {
-		// можно различать ошибки, но достаточно 500/503
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		http.Error(w, "internal error", http.StatusInternalServerError) // 500/503
 		return
 	}
 

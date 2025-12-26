@@ -22,7 +22,7 @@ func TestPostgresRepository_Save_OK(t *testing.T) {
 
 	rows := sqlmock.NewRows([]string{"short_id"}).AddRow(shortID)
 
-	// FIX: ExpectQuery, потому что Save использует QueryRowContext + RETURNING.
+	// ExpectQuery, потому что Save использует QueryRowContext + RETURNING.
 	mock.ExpectQuery(`(?s)INSERT INTO short_urls`).
 		WithArgs(shortID, original, testUser).
 		WillReturnRows(rows)
@@ -46,7 +46,7 @@ func TestPostgresRepository_Save_Duplicate(t *testing.T) {
 
 	rows := sqlmock.NewRows([]string{"short_id"}).AddRow(existingShortID)
 
-	// FIX: возвращаем existingShortID, отличный от newShortID -> repo.Save должен вернуть ErrOriginalAlreadyExists.
+	// возвращаем existingShortID, отличный от newShortID -> repo.Save 
 	mock.ExpectQuery(`(?s)INSERT INTO short_urls`).
 		WithArgs(newShortID, original, testUser).
 		WillReturnRows(rows)
@@ -71,7 +71,7 @@ func TestPostgresRepository_Get_Found(t *testing.T) {
 	shortID := "abc123"
 	original := "https://example.com"
 
-	// FIX: теперь Get читает original_url + is_deleted, поэтому 2 колонки.
+	// Get читает original_url + is_deleted, поэтому 2 колонки.
 	rows := sqlmock.NewRows([]string{"original_url", "is_deleted"}).
 		AddRow(original, false)
 
@@ -96,7 +96,7 @@ func TestPostgresRepository_Get_Deleted(t *testing.T) {
 
 	shortID := "del123"
 
-	// FIX: deleted=true => ok=true, err=ErrDeleted, original можно вернуть пустым.
+	// deleted=true => ok=true, err=ErrDeleted, original можно вернуть пустым.
 	rows := sqlmock.NewRows([]string{"original_url", "is_deleted"}).
 		AddRow("https://example.com/deleted", true)
 
@@ -120,13 +120,13 @@ func TestPostgresRepository_Get_NotFound(t *testing.T) {
 
 	shortID := "unknown"
 
-	// FIX: Get делает SELECT original_url, is_deleted
+	// Get делает SELECT original_url, is_deleted
 	mock.ExpectQuery(`(?s)SELECT original_url,\s*is_deleted`).
 		WithArgs(shortID).
 		WillReturnError(sql.ErrNoRows)
 
 	got, ok, err := repo.Get(context.Background(), shortID)
-	require.NoError(t, err) // FIX: по твоему коду ErrNoRows -> err=nil
+	require.NoError(t, err) // ErrNoRows -> err=nil
 	require.False(t, ok)
 	require.Empty(t, got)
 
