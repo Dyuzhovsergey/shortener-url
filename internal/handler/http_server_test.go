@@ -13,6 +13,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/Dyuzhovsergey/shortener-url/internal/audit"
 	"github.com/Dyuzhovsergey/shortener-url/internal/config"
 	"github.com/Dyuzhovsergey/shortener-url/internal/model"
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
@@ -41,7 +42,8 @@ func setupTestServer() *HTTPServer {
 	logger := zap.NewNop()
 	db := &fakeDB{err: nil}
 
-	return NewHTTPServer(cfg.BaseURL, svc, logger, db)
+	auditor := audit.NewPublisher()
+	return NewHTTPServer(cfg.BaseURL, svc, logger, db, auditor)
 }
 
 func requireNoErr(t *testing.T, err error) {
@@ -176,7 +178,9 @@ func TestHandlePing_OK(t *testing.T) {
 
 	logger := zap.NewNop()
 	db := &fakeDB{err: nil}
-	srv := NewHTTPServer(cfg.BaseURL, svc, logger, db)
+	auditor := audit.NewPublisher()
+
+	srv := NewHTTPServer(cfg.BaseURL, svc, logger, db, auditor)
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	rec := httptest.NewRecorder()
@@ -194,7 +198,9 @@ func TestHandlePing_DBError(t *testing.T) {
 
 	logger := zap.NewNop()
 	db := &fakeDB{err: errors.New("db down")}
-	srv := NewHTTPServer(cfg.BaseURL, svc, logger, db)
+	auditor := audit.NewPublisher()
+
+	srv := NewHTTPServer(cfg.BaseURL, svc, logger, db, auditor)
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	rec := httptest.NewRecorder()

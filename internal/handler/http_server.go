@@ -8,10 +8,12 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/Dyuzhovsergey/shortener-url/internal/audit"
 	"github.com/Dyuzhovsergey/shortener-url/internal/middleware"
 	"github.com/Dyuzhovsergey/shortener-url/internal/model"
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
@@ -28,15 +30,17 @@ type HTTPServer struct {
 	shorter *service.ShorterService
 	logger  *zap.Logger
 	db      DBPinger
+	audit   *audit.Publisher
 }
 
 // NewHTTPServer — конструктор с внедрением зависимости (DI)
-func NewHTTPServer(baseURL string, shorter *service.ShorterService, logger *zap.Logger, db DBPinger) *HTTPServer {
+func NewHTTPServer(baseURL string, shorter *service.ShorterService, logger *zap.Logger, db DBPinger, auditor *audit.Publisher) *HTTPServer {
 	return &HTTPServer{
 		baseURL: baseURL,
 		shorter: shorter,
 		logger:  logger,
 		db:      db,
+		audit:   auditor,
 	}
 }
 
@@ -81,6 +85,8 @@ func (srv *HTTPServer) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	srv.publishAudit(r.Context(), "follow", originalURL)
+
 	w.Header().Set("Location", originalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
 }
@@ -99,18 +105,23 @@ func (srv *HTTPServer) handlePost(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	shortURL, err := srv.shorter.CreateShortURL(r.Context(), string(body), srv.baseURL)
+	originalURL := strings.TrimSpace(string(body))
+	shortURL, err := srv.shorter.CreateShortURL(r.Context(), originalURL, srv.baseURL)
 	if err != nil {
 		if shortURL != "" {
+			srv.publishAudit(r.Context(), "shorten", originalURL)
+
 			w.Header().Set("Content-Type", "text/plain")
-			w.WriteHeader(http.StatusConflict) // 409
-			_, _ = w.Write([]byte(shortURL))   // уже существующий короткий URL
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(shortURL))
 			return
 		}
 
 		http.Error(w, "Invalid URL format", http.StatusBadRequest)
 		return
 	}
+
+	srv.publishAudit(r.Context(), "shorten", originalURL)
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
@@ -131,7 +142,7 @@ func (srv *HTTPServer) handleAPIPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "empty url field", http.StatusBadRequest)
 		return
 	}
-
+	originalURL := strings.TrimSpace(req.URL)
 	shortURL, err := srv.shorter.CreateShortURL(r.Context(), req.URL, srv.baseURL)
 	if err != nil {
 		if shortURL != "" {
@@ -149,6 +160,7 @@ func (srv *HTTPServer) handleAPIPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	srv.publishAudit(r.Context(), "shorten", originalURL)
 	resp := model.ShortenResponse{Result: shortURL}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated) // 201
@@ -279,4 +291,28 @@ func (srv *HTTPServer) handleUserURLsDelete(w http.ResponseWriter, r *http.Reque
 	}
 
 	w.WriteHeader(http.StatusAccepted) // 202
+}
+
+// publishAudit рассылает событие аудита всем подключённым приёмникам.
+//
+// Ошибка аудита не должна влиять на ответ клиенту (аудит — вспомогательная функциональность).
+func (srv *HTTPServer) publishAudit(ctx context.Context, action, originalURL string) {
+	if srv.audit == nil {
+		return
+	}
+
+	userID, _ := middleware.UserIDFromContext(ctx)
+
+	ev := audit.Event{
+		TS:     time.Now().Unix(),
+		Action: action,
+		UserID: userID,
+		URL:    originalURL,
+	}
+
+	if err := srv.audit.Publish(ctx, ev); err != nil {
+		if srv.logger != nil {
+			srv.logger.Warn("audit publish failed", zap.Error(err))
+		}
+	}
 }
