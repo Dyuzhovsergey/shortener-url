@@ -294,8 +294,6 @@ func (srv *HTTPServer) handleUserURLsDelete(w http.ResponseWriter, r *http.Reque
 }
 
 // publishAudit рассылает событие аудита всем подключённым приёмникам.
-//
-// Ошибка аудита не должна влиять на ответ клиенту (аудит — вспомогательная функциональность).
 func (srv *HTTPServer) publishAudit(ctx context.Context, action, originalURL string) {
 	if srv.audit == nil {
 		return
