@@ -151,7 +151,7 @@ func (srv *HTTPServer) handleAPIPost(w http.ResponseWriter, r *http.Request) {
 
 	resp := model.ShortenResponse{Result: shortURL}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
+	w.WriteHeader(http.StatusCreated) // 201
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		srv.logger.Error("failed to write JSON response", zap.Error(err))

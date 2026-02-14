@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"strings"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"go.uber.org/zap"
 
+	"github.com/Dyuzhovsergey/shortener-url/internal/audit"
 	"github.com/Dyuzhovsergey/shortener-url/internal/config"
 	"github.com/Dyuzhovsergey/shortener-url/internal/handler"
 	"github.com/Dyuzhovsergey/shortener-url/internal/logger"
@@ -24,6 +26,29 @@ func main() {
 	// инициализируем zap logger
 	zapLogger := logger.Init()
 	defer zapLogger.Sync()
+
+	// ---------------- Аудит (паттерн «Наблюдатель») ----------------
+	auditor := audit.NewPublisher()
+
+	var fileObserver *audit.FileObserver
+	if strings.TrimSpace(cfg.AuditFile) != "" {
+		obs, err := audit.NewFileObserver(cfg.AuditFile)
+		if err != nil {
+			zapLogger.Fatal("cannot init audit file observer", zap.Error(err))
+		}
+		fileObserver = obs
+		auditor.Add(obs)
+		zapLogger.Info("audit to file enabled", zap.String("path", cfg.AuditFile))
+	}
+
+	if strings.TrimSpace(cfg.AuditURL) != "" {
+		auditor.Add(audit.NewHTTPObserver(cfg.AuditURL))
+		zapLogger.Info("audit to remote enabled", zap.String("url", cfg.AuditURL))
+	}
+
+	if fileObserver != nil {
+		defer func() { _ = fileObserver.Close() }()
+	}
 
 	var (
 		repo repository.Repository
@@ -58,7 +83,7 @@ func main() {
 	shorter := service.NewShorterService(repo, cfg)
 
 	// создаём HTTP-сервер и внедряем сервис
-	server := handler.NewHTTPServer(cfg.BaseURL, shorter, zapLogger, db)
+	server := handler.NewHTTPServer(cfg.BaseURL, shorter, zapLogger, db, auditor)
 
 	fmt.Printf("Server run on: http://%s\n", cfg.RunAddr)
 	if err := http.ListenAndServe(cfg.RunAddr, server.Router()); err != nil {
