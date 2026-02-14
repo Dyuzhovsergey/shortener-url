@@ -8,16 +8,19 @@ import (
 )
 
 type ShortenerConfig struct {
-	CharSet         string
-	LengthID        int
-	BaseURL         string
-	RunAddr         string
+	CharSet  string
+	LengthID int
+	BaseURL  string
+	RunAddr  string
+
 	FileStoragePath string
 	DatabaseDSN     string
+
+	AuditFile string
+	AuditURL  string
 }
 
 func Load() *ShortenerConfig {
-
 	const (
 		defaultRunAddr       = "localhost:8080"
 		defaultBaseURL       = "http://localhost:8080"
@@ -30,6 +33,9 @@ func Load() *ShortenerConfig {
 	flagBaseURL := flag.String("b", defaultBaseURL, "base URL for short links")
 	flagFilePath := flag.String("f", defaultFileStorePath, "file path for URL storage")
 	flagDBDSN := flag.String("d", "", "PostgreSQL DSN")
+
+	flagAuditFile := flag.String("audit-file", "", "path to audit log file")
+	flagAuditURL := flag.String("audit-url", "", "remote audit URL")
 
 	flag.Parse()
 
@@ -49,6 +55,14 @@ func Load() *ShortenerConfig {
 		*flagDBDSN = envDSN
 	}
 
+	if envAuditFile := os.Getenv("AUDIT_FILE"); envAuditFile != "" {
+		*flagAuditFile = envAuditFile
+	}
+
+	if envAuditURL := os.Getenv("AUDIT_URL"); envAuditURL != "" {
+		*flagAuditURL = envAuditURL
+	}
+
 	baseURL := strings.TrimRight(*flagBaseURL, "/")
 
 	cfg := &ShortenerConfig{
@@ -58,6 +72,8 @@ func Load() *ShortenerConfig {
 		RunAddr:         *flagRunAddr,
 		FileStoragePath: *flagFilePath,
 		DatabaseDSN:     *flagDBDSN,
+		AuditFile:       strings.TrimSpace(*flagAuditFile),
+		AuditURL:        strings.TrimSpace(*flagAuditURL),
 	}
 	return cfg
 }
