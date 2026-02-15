@@ -138,14 +138,16 @@ func (srv *HTTPServer) handleAPIPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	originalURL := strings.TrimSpace(req.URL)
 	if req.URL == "" {
 		http.Error(w, "empty url field", http.StatusBadRequest)
 		return
 	}
-	originalURL := strings.TrimSpace(req.URL)
-	shortURL, err := srv.shorter.CreateShortURL(r.Context(), req.URL, srv.baseURL)
+
+	shortURL, err := srv.shorter.CreateShortURL(r.Context(), originalURL, srv.baseURL)
 	if err != nil {
 		if shortURL != "" {
+			srv.publishAudit(r.Context(), "shorten", originalURL)
 			resp := model.ShortenResponse{Result: shortURL}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict) // 409
