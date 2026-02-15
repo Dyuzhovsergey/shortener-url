@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -51,6 +52,12 @@ func (srv *HTTPServer) Router() http.Handler {
 	r.Use(middleware.ZapLogger(srv.logger))
 	r.Use(middleware.GzipMiddleware)
 	r.Use(middleware.AuthMiddleware)
+
+	// pprof включаем только в отладочных запусках.
+	// Пример: PPROF=1 ./shortener
+	if os.Getenv("PPROF") == "1" {
+		mountPprof(r)
+	}
 
 	r.Post("/", srv.handlePost)
 	r.Post("/api/shorten", srv.handleAPIPost)
