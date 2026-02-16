@@ -46,7 +46,7 @@ func TestPostgresRepository_Save_Duplicate(t *testing.T) {
 
 	rows := sqlmock.NewRows([]string{"short_id"}).AddRow(existingShortID)
 
-	// возвращаем existingShortID, отличный от newShortID -> repo.Save 
+	// возвращаем existingShortID, отличный от newShortID -> repo.Save
 	mock.ExpectQuery(`(?s)INSERT INTO short_urls`).
 		WithArgs(newShortID, original, testUser).
 		WillReturnRows(rows)
