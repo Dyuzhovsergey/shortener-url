@@ -12,11 +12,6 @@ import (
 	"sync"
 )
 
-// urlRecord — запись в файловом хранилище.
-//
-// Поддерживаем 2 формата:
-// 1) Старый: один JSON-массив []urlRecord (историческая версия).
-// 2) Новый (оптимизированный): построчный JSON (NDJSON) — одна запись на строке (append-only).
 type urlRecord struct {
 	RecordID    string `json:"record_id"`
 	ShortID     string `json:"short_url"`
@@ -26,13 +21,6 @@ type urlRecord struct {
 }
 
 // FileRepository — реализация Repository с сохранением на диск.
-//
-// Оптимизация памяти и аллокаций:
-// - Больше НЕ храним весь срез records в памяти.
-// - Больше НЕ перезаписываем файл целиком при каждом Save/Delete.
-// - Пишем только "события" (append-only) по одной JSON-строке.
-//
-// При старте репозиторий восстанавливает индексы, проигрывая файл (replay).
 type FileRepository struct {
 	mu sync.RWMutex
 
@@ -41,9 +29,7 @@ type FileRepository struct {
 	userIndex map[string]map[string]string // userID -> (shortID -> originalURL)
 	deleted   map[string]bool              // shortID -> is_deleted
 
-	filePath string
-	// nextRecordID нужен только чтобы сохранять совместимость поля record_id.
-	// Для работы репозитория он не важен.
+	filePath     string
 	nextRecordID int
 }
 
@@ -79,24 +65,31 @@ func NewFileRepository(path string) (*FileRepository, error) {
 		return nil, err
 	}
 
-	// Возвращаемся в начало файла после детекта.
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return nil, err
 	}
 
 	switch format {
 	case "array":
+		// JSON-массив. Считаем, восстановим индексы и
+		// сразу конвертируем в NDJSON, чтобы не было перезаписей.
 		var records []urlRecord
 		dec := json.NewDecoder(f)
 		if err := dec.Decode(&records); err != nil {
 			return nil, err
 		}
+
 		for _, rec := range records {
 			fr.applyRecordLocked(rec)
 		}
+
+		// Конвертируем файл в NDJSON.
+		if err := rewriteAsNDJSON(path, records); err != nil {
+			return nil, err
+		}
+
 	case "ndjson":
 		scanner := bufio.NewScanner(f)
-		// На всякий случай увеличим лимит строки.
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 		for scanner.Scan() {
@@ -114,6 +107,7 @@ func NewFileRepository(path string) (*FileRepository, error) {
 		if err := scanner.Err(); err != nil {
 			return nil, err
 		}
+
 	default:
 		return nil, errors.New("unknown file format")
 	}
@@ -121,12 +115,10 @@ func NewFileRepository(path string) (*FileRepository, error) {
 	return fr, nil
 }
 
-// detectFileFormat определяет формат файла хранилища.
-//
-// array  -> начинается с '[' (после пропуска пробелов)
-// ndjson -> иначе
+// detectFileFormat определяет формат файла:
+// - array  -> начинается с '[' (после пропуска пробелов)
+// - ndjson -> иначе
 func detectFileFormat(f *os.File) (string, error) {
-	// читаем первые несколько байт, пропуская пробелы/переводы строк
 	buf := make([]byte, 1)
 	for {
 		n, err := f.Read(buf)
@@ -151,8 +143,33 @@ func detectFileFormat(f *os.File) (string, error) {
 	}
 }
 
+// rewriteAsNDJSON перезаписывает файл в формате NDJSON (одна запись на строку).
+// Используется только при обнаружении старого формата (JSON-массив).
+func rewriteAsNDJSON(path string, records []urlRecord) error {
+	tmp := path + ".tmp"
+
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+
+	enc := json.NewEncoder(f) // без SetIndent — это важно для аллокаций
+	for _, rec := range records {
+		if err := enc.Encode(rec); err != nil {
+			_ = f.Close()
+			return err
+		}
+	}
+
+	if err := f.Close(); err != nil {
+		return err
+	}
+
+	return os.Rename(tmp, path)
+}
+
 // applyRecordLocked применяет запись к индексам репозитория.
-// Вызывать только под lock'ом (инициализация — без lock, но в одном потоке).
+// Вызывать в одном потоке при инициализации (или под lock).
 func (fr *FileRepository) applyRecordLocked(rec urlRecord) {
 	if rec.ShortID == "" {
 		return
@@ -167,13 +184,13 @@ func (fr *FileRepository) applyRecordLocked(rec urlRecord) {
 		}
 	}
 
-	// Индексы восстанавливаем всегда, даже если запись помечена как удалённая:
-	// это важно, чтобы Get() мог вернуть 410 (ErrDeleted) по shortID.
+	// data/reverse восстанавливаем, для Get.
 	if rec.OriginalURL != "" {
 		fr.data[rec.ShortID] = rec.OriginalURL
 		fr.reverse[rec.OriginalURL] = rec.ShortID
 	}
 
+	// userIndex для /api/user/urls и проверки ownership при delete
 	if rec.UserID != "" && rec.OriginalURL != "" {
 		m, ok := fr.userIndex[rec.UserID]
 		if !ok {
@@ -217,7 +234,7 @@ func (fr *FileRepository) Save(ctx context.Context, shortID, originalURL, userID
 		m[shortID] = originalURL
 	}
 
-	// 4) пишем append-only запись в файл
+	// 4) append-only запись в файл (NDJSON)
 	rec := urlRecord{
 		RecordID:    strconv.Itoa(fr.nextRecordID),
 		ShortID:     shortID,
@@ -276,7 +293,7 @@ func (fr *FileRepository) GetUserURLs(ctx context.Context, userID string) ([]Use
 	return res, nil
 }
 
-// DeleteUserURLs помечает ссылки удалёнными.
+// DeleteUserURLs помечает ссылки удалёнными
 func (fr *FileRepository) DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error {
 	_ = ctx
 
@@ -292,7 +309,6 @@ func (fr *FileRepository) DeleteUserURLs(ctx context.Context, userID string, sho
 		return nil
 	}
 
-	// Пишем записи только для реально изменённых shortID.
 	for _, id := range shortIDs {
 		id = strings.TrimSpace(id)
 		if id == "" {
@@ -334,6 +350,6 @@ func (fr *FileRepository) appendRecordLocked(rec urlRecord) error {
 	}
 	defer f.Close()
 
-	enc := json.NewEncoder(f)
-	return enc.Encode(rec) // Encode сам добавит "\n" в конце
+	enc := json.NewEncoder(f) // без SetIndent
+	return enc.Encode(rec)    // Encode сам добавит "\n"
 }
