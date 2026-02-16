@@ -53,7 +53,7 @@ func (srv *HTTPServer) Router() http.Handler {
 	r.Use(middleware.GzipMiddleware)
 	r.Use(middleware.AuthMiddleware)
 
-	// pprof включаем только в отладочных запусках.  PPROF=1 ./shortener
+	// pprof только в отладочных запусках.  PPROF=1 ./shortener
 	if os.Getenv("PPROF") == "1" {
 		mountPprof(r)
 	}

@@ -49,7 +49,8 @@ func NewShorterService(repo repository.Repository, cfg *config.ShortenerConfig) 
 	}
 	// Пул буферов под генерацию shortID.
 	svc.idPool.New = func() any {
-		return make([]byte, svc.cfg.LengthID)
+		b := make([]byte, svc.cfg.LengthID)
+		return &b
 	}
 
 	go svc.deleteWorker() // асинхронный воркер
@@ -107,10 +108,6 @@ func (svc *ShorterService) CreateShortURL(ctx context.Context, originalURL strin
 		return "", errors.New("failed to generate unique shortID")
 	}
 
-	if err != nil {
-		return "", err
-	}
-
 	userID, _ := middleware.UserIDFromContext(ctx)
 
 	if err := svc.repo.Save(ctx, shortID, originalURL, userID); err != nil {
@@ -135,22 +132,24 @@ func (svc *ShorterService) GetOriginalURL(ctx context.Context, shortID string) (
 
 // generateID — генерирует случайный shortID.
 func (svc *ShorterService) generateID() string {
-	buf := svc.idPool.Get().([]byte)
+	bufp := svc.idPool.Get().(*[]byte)
+	buf := *bufp
+
 	if cap(buf) < svc.cfg.LengthID {
 		buf = make([]byte, svc.cfg.LengthID)
 	}
 	buf = buf[:svc.cfg.LengthID]
 
-	// rand.Rand не потокобезопасен — защищаем доступ mutex'ом.
 	svc.mu.Lock()
 	for i := 0; i < svc.cfg.LengthID; i++ {
 		buf[i] = svc.cfg.CharSet[svc.rnd.Intn(len(svc.cfg.CharSet))]
 	}
 	svc.mu.Unlock()
-
-	// string(buf) создаёт копию — поэтому buf безопасно вернуть в pool.
 	id := string(buf)
-	svc.idPool.Put(buf)
+
+	*bufp = buf
+	svc.idPool.Put(bufp)
+
 	return id
 }
 
