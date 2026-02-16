@@ -35,6 +35,8 @@ type ShorterService struct {
 	mu   sync.Mutex
 
 	deleteCh chan deleteTask
+
+	idPool sync.Pool
 }
 
 // NewShorterService - Конструктор с внедрением зависимости (DI)
@@ -44,6 +46,10 @@ func NewShorterService(repo repository.Repository, cfg *config.ShortenerConfig) 
 		cfg:      cfg,
 		rnd:      rand.New(rand.NewSource(time.Now().UnixNano())),
 		deleteCh: make(chan deleteTask, 1024),
+	}
+	// Пул буферов под генерацию shortID.
+	svc.idPool.New = func() any {
+		return make([]byte, svc.cfg.LengthID)
 	}
 
 	go svc.deleteWorker() // асинхронный воркер
@@ -81,8 +87,10 @@ func (svc *ShorterService) CreateShortURL(ctx context.Context, originalURL strin
 	baseURL = strings.TrimRight(baseURL, "/")
 
 	var shortID string
+	unique := false
 
 	for i := 0; i < maxAttempts; i++ {
+
 		shortID = svc.generateID()
 
 		_, ok, err := svc.repo.Get(ctx, shortID)
@@ -90,16 +98,17 @@ func (svc *ShorterService) CreateShortURL(ctx context.Context, originalURL strin
 			return "", err
 		}
 		if !ok {
+			unique = true
 			break
 		}
 	}
 
-	_, ok, err := svc.repo.Get(ctx, shortID)
+	if !unique {
+		return "", errors.New("failed to generate unique shortID")
+	}
+
 	if err != nil {
 		return "", err
-	}
-	if ok {
-		return "", errors.New("failed to generate unique shortID")
 	}
 
 	userID, _ := middleware.UserIDFromContext(ctx)
@@ -126,14 +135,23 @@ func (svc *ShorterService) GetOriginalURL(ctx context.Context, shortID string) (
 
 // generateID — генерирует случайный shortID.
 func (svc *ShorterService) generateID() string {
-	svc.mu.Lock()
-	defer svc.mu.Unlock()
-
-	id := make([]byte, svc.cfg.LengthID)
-	for i := range id {
-		id[i] = svc.cfg.CharSet[svc.rnd.Intn(len(svc.cfg.CharSet))]
+	buf := svc.idPool.Get().([]byte)
+	if cap(buf) < svc.cfg.LengthID {
+		buf = make([]byte, svc.cfg.LengthID)
 	}
-	return string(id)
+	buf = buf[:svc.cfg.LengthID]
+
+	// rand.Rand не потокобезопасен — защищаем доступ mutex'ом.
+	svc.mu.Lock()
+	for i := 0; i < svc.cfg.LengthID; i++ {
+		buf[i] = svc.cfg.CharSet[svc.rnd.Intn(len(svc.cfg.CharSet))]
+	}
+	svc.mu.Unlock()
+
+	// string(buf) создаёт копию — поэтому buf безопасно вернуть в pool.
+	id := string(buf)
+	svc.idPool.Put(buf)
+	return id
 }
 
 // GetUserURLs для получения ссылок пользователя
