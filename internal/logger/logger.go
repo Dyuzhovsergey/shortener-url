@@ -7,7 +7,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// Init zap.Logger
+// Init инициализирует zap-логгер приложения.
+//
+// Вызывается один раз в main, после чего логгер используется во всём приложении.
 func Init() *zap.Logger {
 	logger, err := zap.NewDevelopment()
 	if err != nil {
