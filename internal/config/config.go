@@ -1,3 +1,5 @@
+// Package config содержит загрузку конфигурации сервиса сокращения URL из флагов
+// командной строки и переменных окружения.
 package config
 
 import (
@@ -7,6 +9,7 @@ import (
 )
 
 // ShortenerConfig описывает параметры запуска сервиса.
+//
 // Значения заполняются из флагов командной строки и переменных окружения.
 // Переменные окружения имеют приоритет над флагами.
 type ShortenerConfig struct {
@@ -22,6 +25,8 @@ type ShortenerConfig struct {
 	AuditURL  string
 }
 
+// Load читает конфигурацию из флагов и переменных окружения, применяя значения
+// по умолчанию.
 func Load() *ShortenerConfig {
 	const (
 		defaultRunAddr       = "localhost:8080"
