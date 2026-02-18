@@ -1,4 +1,3 @@
-// Package handler for working HTTP server
 package handler
 
 import (
@@ -21,6 +20,7 @@ import (
 	"github.com/Dyuzhovsergey/shortener-url/internal/service"
 )
 
+// DBPinger описывает минимальный интерфейс для проверки доступности базы данных.
 type DBPinger interface {
 	PingContext(ctx context.Context) error
 }
@@ -34,7 +34,7 @@ type HTTPServer struct {
 	audit   *audit.Publisher
 }
 
-// NewHTTPServer — конструктор с внедрением зависимости (DI)
+// NewHTTPServer — конструктор с внедрением зависимости (DI).
 func NewHTTPServer(baseURL string, shorter *service.ShorterService, logger *zap.Logger, db DBPinger, auditor *audit.Publisher) *HTTPServer {
 	return &HTTPServer{
 		baseURL: baseURL,
@@ -45,7 +45,7 @@ func NewHTTPServer(baseURL string, shorter *service.ShorterService, logger *zap.
 	}
 }
 
-// Router — возвращает готовый http.Handler (ServeMux)
+// Router собирает роутер и возвращает готовый http.Handler.
 func (srv *HTTPServer) Router() http.Handler {
 	r := chi.NewRouter()
 
