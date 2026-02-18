@@ -1,4 +1,4 @@
-// Package model for struct JSON API
+// Package model содержит структуры запросов и ответов HTTP API (JSON).
 package model
 
 // ShortenRequest и ShortenResponse структуры для JSON API

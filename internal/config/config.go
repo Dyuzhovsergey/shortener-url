@@ -1,4 +1,3 @@
-// Package config for config program and flags
 package config
 
 import (
@@ -7,6 +6,9 @@ import (
 	"strings"
 )
 
+// ShortenerConfig описывает параметры запуска сервиса.
+// Значения заполняются из флагов командной строки и переменных окружения.
+// Переменные окружения имеют приоритет над флагами.
 type ShortenerConfig struct {
 	CharSet  string
 	LengthID int
