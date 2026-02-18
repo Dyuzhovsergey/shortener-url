@@ -33,6 +33,8 @@ type FileRepository struct {
 	nextRecordID int
 }
 
+// NewFileRepository создаёт файловое хранилище по указанному пути и восстанавливает индексы из файла,
+// если файл уже существует.
 func NewFileRepository(path string) (*FileRepository, error) {
 	fr := &FileRepository{
 		data:         make(map[string]string),

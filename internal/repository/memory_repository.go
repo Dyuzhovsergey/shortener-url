@@ -27,6 +27,7 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
+// Save сохраняет ссылку в памяти.
 func (repo *MemoryRepository) Save(ctx context.Context, shortID, originalURL, userID string) error {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
