@@ -1,4 +1,3 @@
-// Package service for business logic project
 package service
 
 import (
@@ -18,7 +17,9 @@ import (
 const maxAttempts = 10
 
 var (
-	ErrAlreadyExists   = errors.New("URL already exists")
+	// ErrAlreadyExists возвращается при попытке сократить URL, который уже есть в хранилище.
+	ErrAlreadyExists = errors.New("URL already exists")
+	// ErrDeleteQueueFull возвращается, если очередь на асинхронное удаление переполнена.
 	ErrDeleteQueueFull = errors.New("delete queue is full")
 )
 
@@ -39,7 +40,7 @@ type ShorterService struct {
 	idPool sync.Pool
 }
 
-// NewShorterService - Конструктор с внедрением зависимости (DI)
+// NewShorterService создаёт сервис сокращения URL и запускает фонового воркера для удаления.
 func NewShorterService(repo repository.Repository, cfg *config.ShortenerConfig) *ShorterService {
 	svc := &ShorterService{
 		repo:     repo,
@@ -153,7 +154,7 @@ func (svc *ShorterService) generateID() string {
 	return id
 }
 
-// GetUserURLs для получения ссылок пользователя
+// GetUserURLs возвращает список ссылок текущего пользователя (из контекста запроса).
 func (svc *ShorterService) GetUserURLs(ctx context.Context) ([]repository.UserURL, error) {
 	userID, ok := middleware.UserIDFromContext(ctx)
 	if !ok || userID == "" {
@@ -185,6 +186,7 @@ func (svc *ShorterService) CreateShortURLBatch(ctx context.Context, baseURL stri
 	return results, nil
 }
 
+// DeleteUserURLsAsync ставит удаление ссылок пользователя в очередь и возвращает сразу (202 на HTTP-уровне)
 func (svc *ShorterService) DeleteUserURLsAsync(ctx context.Context, shortIDs []string) error {
 	userID, ok := middleware.UserIDFromContext(ctx)
 	if !ok || userID == "" {
