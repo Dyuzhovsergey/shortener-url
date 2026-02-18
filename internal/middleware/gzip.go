@@ -69,7 +69,8 @@ func (c *compressReader) Close() error {
 	return c.r.Close()
 }
 
-// GzipMiddleware — middleware для поддержки gzip и на запросах и ответах
+// GzipMiddleware добавляет поддержку gzip для ответов (если клиент прислал Accept-Encoding: gzip)
+// и для запросов (если клиент прислал Content-Encoding: gzip).
 func GzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ow := w
