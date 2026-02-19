@@ -46,10 +46,8 @@ func newTestServer() *httptest.Server {
 
 	log := zap.NewNop()
 
-	// Аудит для примеров можно включить "пустым" паблишером: событийные приёмники не подключаем.
 	aud := audit.NewPublisher()
 
-	// Если у тебя сигнатура NewHTTPServer без аудита — просто убери последний аргумент (aud).
 	srv := handler.NewHTTPServer(testBaseURL, svc, log, okDB{}, aud)
 
 	return httptest.NewServer(srv.Router())
@@ -74,7 +72,6 @@ func shortenPlain(client *http.Client, base string, original string) (string, in
 		return "", 0, err
 	}
 	req.Header.Set("Content-Type", "text/plain")
-	// Чтобы не усложнять примеры gzip-сжатием.
 	req.Header.Set("Accept-Encoding", "identity")
 
 	resp, err := client.Do(req)
@@ -106,7 +103,7 @@ func Example_endpoints_shorten_plain() {
 		return
 	}
 
-	// shortID случайный, поэтому печатаем только статус и длину (она стабильна при LengthID=8).
+	// shortID случайный
 	shortLen := len(testBaseURL + "/" + id)
 
 	fmt.Println("status:", status)
@@ -167,7 +164,7 @@ func Example_endpoints_follow_redirect() {
 	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/"+id, nil)
 	req.Header.Set("Accept-Encoding", "identity")
 
-	// Чтобы не идти реально по редиректу, отключаем автоматический follow.
+	// Отключаем автоматический follow.
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
@@ -227,7 +224,6 @@ func Example_endpoints_user_urls_and_delete() {
 	ts := newTestServer()
 	defer ts.Close()
 
-	// Cookie jar обязателен: AuthMiddleware выдаёт user_id cookie.
 	client := newClient(true)
 
 	id1, _, err := shortenPlain(client, ts.URL, "https://example.com/u1")
