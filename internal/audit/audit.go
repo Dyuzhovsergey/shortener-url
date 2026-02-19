@@ -21,7 +21,7 @@ type Publisher struct {
 	observers []Observer
 }
 
-// NewPublisher создаёт Publisher.
+// NewPublisher создаёт Publisher без подписчиков.
 func NewPublisher() *Publisher {
 	return &Publisher{}
 }

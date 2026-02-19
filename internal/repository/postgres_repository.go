@@ -96,6 +96,7 @@ func (r *PostgresRepository) GetUserURLs(ctx context.Context, userID string) ([]
 	return res, nil
 }
 
+// DeleteUserURLs помечает ссылки пользователя как удалённые в базе данных.
 func (r *PostgresRepository) DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error {
 	if userID == "" || len(shortIDs) == 0 {
 		return nil
