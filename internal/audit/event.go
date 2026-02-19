@@ -2,14 +2,12 @@ package audit
 
 // Event — событие аудита.
 //
-// Формат JSON:
-//
-//	{
-//	  "ts": 12345678,
-//	  "action": "shorten"|"follow",
-//	  "user_id": "...",
-//	  "url": "https://..."
-//	}
+// Поля:
+//   - TS: unix timestamp события
+//   - Action: действие ("shorten" или "follow")
+//   - UserID: идентификатор пользователя (если есть)
+//   - URL: оригинальный URL (не сокращённый)
+
 type Event struct {
 	TS     int64  `json:"ts"`
 	Action string `json:"action"`

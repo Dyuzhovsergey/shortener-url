@@ -13,7 +13,7 @@ type FileObserver struct {
 	f  *os.File
 }
 
-// NewFileObserver открывает файл для записи (создаёт, если не существует).
+// NewFileObserver открывает (или создаёт) файл для записи аудита.
 func NewFileObserver(path string) (*FileObserver, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
@@ -22,7 +22,7 @@ func NewFileObserver(path string) (*FileObserver, error) {
 	return &FileObserver{f: f}, nil
 }
 
-// Observe реализует интерфейс Observer.
+// Observe сериализует событие в JSON и дописывает его в файл отдельной строкой.
 func (o *FileObserver) Observe(_ context.Context, event Event) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()

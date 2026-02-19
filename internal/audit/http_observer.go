@@ -15,7 +15,7 @@ type HTTPObserver struct {
 	url    string
 }
 
-// NewHTTPObserver создаёт HTTPObserver.
+// NewHTTPObserver создаёт HTTPObserver с дефолтным таймаутом клиента.
 func NewHTTPObserver(url string) *HTTPObserver {
 	return &HTTPObserver{
 		client: &http.Client{Timeout: 2 * time.Second},
@@ -23,7 +23,7 @@ func NewHTTPObserver(url string) *HTTPObserver {
 	}
 }
 
-// Observe реализует интерфейс Observer.
+// Observe отправляет событие аудита POST-запросом в формате JSON.
 func (o *HTTPObserver) Observe(ctx context.Context, event Event) error {
 	b, err := json.Marshal(event)
 	if err != nil {
