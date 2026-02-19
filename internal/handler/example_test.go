@@ -91,7 +91,7 @@ func shortenPlain(client *http.Client, base string, original string) (string, in
 	return id, resp.StatusCode, nil
 }
 
-func Example_endpoints_shorten_plain() {
+func ExampleHTTPServer_shortenPlain() {
 	ts := newTestServer()
 	defer ts.Close()
 
@@ -114,7 +114,7 @@ func Example_endpoints_shorten_plain() {
 	// short_url_len: 27
 }
 
-func Example_endpoints_shorten_json() {
+func ExampleHTTPServer_shortenJSON() {
 	ts := newTestServer()
 	defer ts.Close()
 
@@ -145,7 +145,7 @@ func Example_endpoints_shorten_json() {
 	// short_url_len: 27
 }
 
-func Example_endpoints_follow_redirect() {
+func ExampleHTTPServer_followRedirect() {
 	ts := newTestServer()
 	defer ts.Close()
 
@@ -184,7 +184,7 @@ func Example_endpoints_follow_redirect() {
 	// location: https://example.com/redirect/me
 }
 
-func Example_endpoints_batch() {
+func ExampleHTTPServer_batch() {
 	ts := newTestServer()
 	defer ts.Close()
 
@@ -220,7 +220,7 @@ func Example_endpoints_batch() {
 	// corr_ids: 1 2
 }
 
-func Example_endpoints_user_urls_and_delete() {
+func ExampleHTTPServer_userURLsAndDelete() {
 	ts := newTestServer()
 	defer ts.Close()
 
@@ -278,7 +278,7 @@ func Example_endpoints_user_urls_and_delete() {
 	// delete_status: 202
 }
 
-func Example_endpoints_ping() {
+func ExampleHTTPServer_ping() {
 	ts := newTestServer()
 	defer ts.Close()
 
