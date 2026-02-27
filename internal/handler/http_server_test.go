@@ -7,7 +7,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -326,5 +328,145 @@ func TestHandleDeleteUserURLs_AcceptsAndEventuallyGone(t *testing.T) {
 		}
 
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+type testAuditObserver struct {
+	mu     sync.Mutex
+	events []audit.Event
+}
+
+func (o *testAuditObserver) Observe(_ context.Context, event audit.Event) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.events = append(o.events, event)
+	return nil
+}
+
+func (o *testAuditObserver) Last() (audit.Event, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if len(o.events) == 0 {
+		return audit.Event{}, false
+	}
+	return o.events[len(o.events)-1], true
+}
+
+func TestAudit_POSTRoot_Shorten(t *testing.T) {
+	srv := setupTestServer()
+	router := srv.Router()
+
+	obs := &testAuditObserver{}
+	auditor := audit.NewPublisher()
+	auditor.Add(obs)
+	// ВАЖНО: сервер в тесте должен быть создан с этим auditor.
+	// Если в setupTestServer auditor создаётся внутри — поменяй setupTestServer так,
+	// чтобы он принимал auditor параметром или чтобы srv.audit = auditor.
+	srv.audit = auditor
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://example.com/path"))
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected %d, got %d", http.StatusCreated, w.Code)
+	}
+
+	ev, ok := obs.Last()
+	if !ok {
+		t.Fatalf("expected audit event")
+	}
+	if ev.Action != "shorten" {
+		t.Fatalf("expected action shorten, got %q", ev.Action)
+	}
+	if ev.URL != "https://example.com/path" {
+		t.Fatalf("expected url %q, got %q", "https://example.com/path", ev.URL)
+	}
+	if ev.TS <= 0 {
+		t.Fatalf("expected ts > 0, got %d", ev.TS)
+	}
+	if ev.UserID == "" {
+		t.Fatalf("expected non-empty user_id")
+	}
+}
+
+func TestAudit_POSTAPIShorten_Shorten(t *testing.T) {
+	srv := setupTestServer()
+	router := srv.Router()
+
+	obs := &testAuditObserver{}
+	auditor := audit.NewPublisher()
+	auditor.Add(obs)
+	srv.audit = auditor
+
+	body := `{"url":"https://example.com/api"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected %d, got %d", http.StatusCreated, w.Code)
+	}
+
+	ev, ok := obs.Last()
+	if !ok {
+		t.Fatalf("expected audit event")
+	}
+	if ev.Action != "shorten" {
+		t.Fatalf("expected action shorten, got %q", ev.Action)
+	}
+	if ev.URL != "https://example.com/api" {
+		t.Fatalf("expected url %q, got %q", "https://example.com/api", ev.URL)
+	}
+	if ev.UserID == "" {
+		t.Fatalf("expected non-empty user_id")
+	}
+}
+
+func TestAudit_GETFollow_Follow(t *testing.T) {
+	srv := setupTestServer()
+	router := srv.Router()
+
+	obs := &testAuditObserver{}
+	auditor := audit.NewPublisher()
+	auditor.Add(obs)
+	srv.audit = auditor
+
+	original := "https://example.com/follow"
+	shortURL, err := srv.shorter.CreateShortURL(context.Background(), original, srv.baseURL)
+	if err != nil {
+		t.Fatalf("CreateShortURL: %v", err)
+	}
+
+	u, err := url.Parse(shortURL)
+	if err != nil {
+		t.Fatalf("parse short url: %v", err)
+	}
+	id := strings.TrimPrefix(u.Path, "/")
+
+	req := httptest.NewRequest(http.MethodGet, "/"+id, nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("expected %d, got %d", http.StatusTemporaryRedirect, w.Code)
+	}
+
+	ev, ok := obs.Last()
+	if !ok {
+		t.Fatalf("expected audit event")
+	}
+	if ev.Action != "follow" {
+		t.Fatalf("expected action follow, got %q", ev.Action)
+	}
+	if ev.URL != original {
+		t.Fatalf("expected url %q, got %q", original, ev.URL)
+	}
+	if ev.UserID == "" {
+		t.Fatalf("expected non-empty user_id")
 	}
 }
