@@ -60,14 +60,14 @@ func NewShorterService(repo repository.Repository, cfg *config.ShortenerConfig) 
 
 // BatchItem — один элемент батч-запроса для сервиса.
 type BatchItem struct {
-	CorrelationID string
-	OriginalURL   string
+	CorrelationID string `json:"correlation_id"`
+	OriginalURL   string `json:"original_url"`
 }
 
 // BatchResult — результат обработки одного элемента батча.
 type BatchResult struct {
-	CorrelationID string
-	ShortURL      string
+	CorrelationID string `json:"correlation_id"`
+	ShortURL      string `json:"short_url"`
 }
 
 // CreateShortURL — создаёт короткую ссылку и сохраняет её.
@@ -163,27 +163,37 @@ func (svc *ShorterService) GetUserURLs(ctx context.Context) ([]repository.UserUR
 	return svc.repo.GetUserURLs(ctx, userID)
 }
 
-// CreateShortURLBatch — обрабатывает батч URL'ов.
-func (svc *ShorterService) CreateShortURLBatch(ctx context.Context, baseURL string, items []BatchItem) ([]BatchResult, error) {
+// CreateShortURLBatch создаёт короткие ссылки для батч-запроса.
+// При ошибке валидации любого URL возвращает ошибку.
+// CreateShortURLBatch создаёт короткие ссылки для батч-запроса.
+// Возвращает результат в том же порядке, что и входные элементы.
+func (svc *ShorterService) CreateShortURLBatch(
+	ctx context.Context,
+	baseURL string,
+	items []BatchItem,
+) ([]BatchResult, error) {
 	if len(items) == 0 {
-		return nil, errors.New("empty batch")
+		return nil, nil
 	}
 
-	results := make([]BatchResult, 0, len(items))
+	res := make([]BatchResult, 0, len(items))
 
 	for _, it := range items {
-		shortURL, err := svc.CreateShortURL(ctx, it.OriginalURL, baseURL)
-		if err != nil {
+		original := strings.TrimSpace(it.OriginalURL)
+
+		shortURL, err := svc.CreateShortURL(ctx, original, baseURL)
+		// Если shortURL пустой — это настоящая ошибка (например, invalid URL format).
+		if err != nil && shortURL == "" {
 			return nil, err
 		}
 
-		results = append(results, BatchResult{
+		res = append(res, BatchResult{
 			CorrelationID: it.CorrelationID,
 			ShortURL:      shortURL,
 		})
 	}
 
-	return results, nil
+	return res, nil
 }
 
 // DeleteUserURLsAsync ставит удаление ссылок пользователя в очередь и возвращает сразу (202 на HTTP-уровне)
