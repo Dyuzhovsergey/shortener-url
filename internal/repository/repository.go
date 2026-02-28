@@ -11,8 +11,8 @@ var ErrDeleted = errors.New("url is deleted")
 
 // UserURL представляет ссылку пользователя в формате {shortID, originalURL}.
 type UserURL struct {
-	ShortID     string
-	OriginalURL string
+	ShortID     string `json:"short_url"`
+	OriginalURL string `json:"original_url"`
 }
 
 // Repository описывает поведение хранилища сокращённых ссылок.
