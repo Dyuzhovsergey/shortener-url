@@ -1,3 +1,4 @@
+//go:generate go run ../reset
 package main
 
 import (
