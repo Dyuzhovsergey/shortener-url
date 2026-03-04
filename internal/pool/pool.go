@@ -1,3 +1,4 @@
+// Package pool generic
 package pool
 
 import "sync"
