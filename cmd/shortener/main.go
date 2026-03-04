@@ -20,7 +20,15 @@ import (
 	"github.com/Dyuzhovsergey/shortener-url/migrations"
 )
 
+var (
+	buildVersion string
+	buildDate    string
+	buildCommit  string
+)
+
 func main() {
+	printBuildInfo()
+
 	// парсим флаги
 	cfg := config.Load()
 
@@ -90,4 +98,25 @@ func main() {
 	if err := http.ListenAndServe(cfg.RunAddr, server.Router()); err != nil {
 		zapLogger.Fatal("server stopped", zap.Error(err))
 	}
+}
+
+func printBuildInfo() {
+	version := buildVersion
+	if version == "" {
+		version = "N/A"
+	}
+
+	date := buildDate
+	if date == "" {
+		date = "N/A"
+	}
+
+	commit := buildCommit
+	if commit == "" {
+		commit = "N/A"
+	}
+
+	fmt.Println("Build version:", version)
+	fmt.Println("Build date:", date)
+	fmt.Println("Build commit:", commit)
 }
