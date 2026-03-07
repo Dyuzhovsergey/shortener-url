@@ -36,7 +36,7 @@ func makeTestConfig() *config.ShortenerConfig {
 	}
 }
 
-func setupTestServer() *HTTPServer {
+func setupTestServer(auditor *audit.Publisher) *HTTPServer {
 	repo := repository.NewMemoryRepository()
 	cfg := makeTestConfig()
 	svc := service.NewShorterService(repo, cfg)
@@ -44,7 +44,6 @@ func setupTestServer() *HTTPServer {
 	logger := zap.NewNop()
 	db := &fakeDB{err: nil}
 
-	auditor := audit.NewPublisher()
 	return NewHTTPServer(cfg.BaseURL, svc, logger, db, auditor)
 }
 
@@ -76,7 +75,7 @@ func getAuthCookieFromResponse(t *testing.T, res *http.Response) *http.Cookie {
 
 // --- POST / — создание короткого URL ---
 func TestHandlePost(t *testing.T) {
-	srv := setupTestServer()
+	srv := setupTestServer(nil)
 
 	reqBody := "https://practicum.yandex.ru/"
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(reqBody))
@@ -104,7 +103,7 @@ func TestHandlePost(t *testing.T) {
 
 // --- GET /{id} — редирект ---
 func TestHandleGet_Redirect(t *testing.T) {
-	srv := setupTestServer()
+	srv := setupTestServer(nil)
 
 	// 1) создаём ссылку
 	orig := "https://example.com"
@@ -142,7 +141,7 @@ func TestHandleGet_Redirect(t *testing.T) {
 }
 
 func TestHandleAPIPost_OK(t *testing.T) {
-	srv := setupTestServer()
+	srv := setupTestServer(nil)
 
 	body := `{"url":"https://practicum.yandex.ru/"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
@@ -214,7 +213,7 @@ func TestHandlePing_DBError(t *testing.T) {
 }
 
 func TestHandleAPIPostBatch_OK(t *testing.T) {
-	srv := setupTestServer()
+	srv := setupTestServer(nil)
 
 	body := `[
 		{"correlation_id":"1","original_url":"https://practicum.yandex.ru/"},
@@ -258,7 +257,7 @@ func TestHandleAPIPostBatch_OK(t *testing.T) {
 // 2) DELETE с этой cookie -> 202
 // 3) ждём чуть-чуть (т.к. async) и GET -> 410
 func TestHandleDeleteUserURLs_AcceptsAndEventuallyGone(t *testing.T) {
-	srv := setupTestServer()
+	srv := setupTestServer(nil)
 
 	// 1) создаём ссылку
 	orig := "https://example.com/to-delete"
@@ -353,7 +352,7 @@ func (o *testAuditObserver) Last() (audit.Event, bool) {
 }
 
 func TestAudit_POSTRoot_Shorten(t *testing.T) {
-	srv := setupTestServer()
+	srv := setupTestServer(nil)
 	router := srv.Router()
 
 	obs := &testAuditObserver{}
@@ -392,7 +391,7 @@ func TestAudit_POSTRoot_Shorten(t *testing.T) {
 }
 
 func TestAudit_POSTAPIShorten_Shorten(t *testing.T) {
-	srv := setupTestServer()
+	srv := setupTestServer(nil)
 	router := srv.Router()
 
 	obs := &testAuditObserver{}
@@ -427,13 +426,12 @@ func TestAudit_POSTAPIShorten_Shorten(t *testing.T) {
 }
 
 func TestAudit_GETFollow_Follow(t *testing.T) {
-	srv := setupTestServer()
-	router := srv.Router()
-
 	obs := &testAuditObserver{}
 	auditor := audit.NewPublisher()
 	auditor.Add(obs)
-	srv.audit = auditor
+
+	srv := setupTestServer(auditor)
+	router := srv.Router()
 
 	original := "https://example.com/follow"
 	shortURL, err := srv.shorter.CreateShortURL(context.Background(), original, srv.baseURL)
