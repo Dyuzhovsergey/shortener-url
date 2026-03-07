@@ -35,32 +35,28 @@ import (
 	"honnef.co/go/tools/stylecheck"
 )
 
+func lintToAnalysis(list []*hclint.Analyzer) []*analysis.Analyzer {
+	res := make([]*analysis.Analyzer, 0, len(list))
+	for _, a := range list {
+		if a == nil || a.Analyzer == nil {
+			continue
+		}
+		res = append(res, a.Analyzer)
+	}
+	return res
+}
+
+func mustFindByName(list []*hclint.Analyzer, name string) *analysis.Analyzer {
+	for _, a := range list {
+		if a != nil && a.Analyzer != nil && a.Analyzer.Name == name {
+			return a.Analyzer
+		}
+	}
+	panic(fmt.Sprintf("staticlint: required analyzer %q not found", name))
+}
+
 func main() {
-	// lintToAnalysis преобразует список анализаторов staticcheck (lint.Analyzer) в анализаторы x/tools (analysis.Analyzer).
-	lintToAnalysis := func(list []*hclint.Analyzer) []*analysis.Analyzer {
-		res := make([]*analysis.Analyzer, 0, len(list))
-		for _, a := range list {
-			if a == nil || a.Analyzer == nil {
-				continue
-			}
-			res = append(res, a.Analyzer)
-		}
-		return res
-	}
-
-	// mustFindByName ищет анализатор по имени (например "ST1000") и паникует, если не найден.
-	// Это нужно, чтобы multichecker гарантированно включал минимум один анализатор “не SA” класса.
-	mustFindByName := func(list []*hclint.Analyzer, name string) *analysis.Analyzer {
-		for _, a := range list {
-			if a != nil && a.Analyzer != nil && a.Analyzer.Name == name {
-				return a.Analyzer
-			}
-		}
-		panic(fmt.Sprintf("staticlint: required analyzer %q not found", name))
-	}
-
-	// Набор анализаторов из x/tools (vet-подобные проверки).
-	// Здесь не обязаны быть ВСЕ passes/*, важно, что они присутствуют как класс анализаторов.
+	// Набор анализаторов из x/tools
 	analyzers := []*analysis.Analyzer{
 		assign.Analyzer,
 		atomic.Analyzer,
@@ -84,18 +80,18 @@ func main() {
 		unusedresult.Analyzer,
 	}
 
-	// Все SA-анализаторы staticcheck
+	// Все SA-анализаторы staticcheck.
 	analyzers = append(analyzers, lintToAnalysis(staticcheck.Analyzers)...)
 
-	// Минимум один анализатор из других классов (не SA).
+	// Анализатор из других классов
 	// Берём ST1000 — проверка наличия package comment.
 	analyzers = append(analyzers, mustFindByName(stylecheck.Analyzers, "ST1000"))
 
-	// Два публичных анализатора на выбор
+	// Два публичных анализатора на выбор.
 	analyzers = append(analyzers, ineffassign.Analyzer)
 	analyzers = append(analyzers, bodyclose.Analyzer)
 
-	// Собственный анализатор (лежит в cmd/staticlint/no_os_exit_in_main.go)
+	// noOsExitInMainAnalyzer анализатор.
 	analyzers = append(analyzers, noOsExitInMainAnalyzer)
 
 	multichecker.Main(analyzers...)
