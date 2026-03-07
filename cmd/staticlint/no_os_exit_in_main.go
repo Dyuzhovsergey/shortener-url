@@ -3,71 +3,53 @@ package main
 import (
 	"go/ast"
 	"go/types"
-	"strings"
 
 	"golang.org/x/tools/go/analysis"
 )
 
-// noOsExitInMainAnalyzer — анализатор проекта, запрещающий прямой вызов os.Exit
-// внутри func main() пакета main.
-//
-// Назначение: принудить выносить логику запуска в отдельную функцию (например, run() error),
-// чтобы main содержал только обработку ошибки и инициализацию.
+// noOsExitInMainAnalyzer проверяет, что:
+// - os.Exit(...)
+// - panic(...)
+// - log.Fatal(...), log.Fatalf(...), log.Fatalln(...)
+// не вызываются вне функции main.
 var noOsExitInMainAnalyzer = &analysis.Analyzer{
-	Name: "noosexitmain",
-	Doc:  "запрещает прямой вызов os.Exit в функции main пакета main (только в модуле проекта)",
+	Name: "noexit",
+	Doc:  "forbids os.Exit, panic and log.Fatal* outside main function",
 	Run:  runNoOsExitInMain,
 }
 
-// runNoOsExitInMain проверяет, что в func main() пакета main нет прямого вызова os.Exit(...).
+// runNoOsExitInMain проверяет, что вне func main() нет прямых вызовов
+// os.Exit(...), panic(...), log.Fatal(...), log.Fatalf(...), log.Fatalln(...).
 func runNoOsExitInMain(pass *analysis.Pass) (any, error) {
-	// Интересует только пакет main.
-	if pass.Pkg == nil || pass.Pkg.Name() != "main" {
-		return nil, nil
-	}
-
-	// Ограничиваем анализ только пакетами твоего модуля, чтобы не ловить чужие main.
-	const modulePath = "github.com/Dyuzhovsergey/shortener-url"
-	if !strings.HasPrefix(pass.Pkg.Path(), modulePath) {
-		return nil, nil
-	}
-
-	if pass.TypesInfo == nil {
-		return nil, nil
-	}
-
-	for _, f := range pass.Files {
-		// Иногда при анализе тестов/go/packages могут попадаться сгенерированные файлы из go-build cache.
-		// Там реально есть os.Exit в test main — нам это не интересно.
-		if pass.Fset != nil {
-			tf := pass.Fset.File(f.Pos())
-			if tf != nil {
-				name := tf.Name()
-				if strings.Contains(name, "go-build") || strings.Contains(name, ".cache/go-build") {
-					continue
-				}
-			}
-		}
-
-		for _, decl := range f.Decls {
+	for _, file := range pass.Files {
+		for _, decl := range file.Decls {
 			fd, ok := decl.(*ast.FuncDecl)
-			if !ok {
+			if !ok || fd.Body == nil {
 				continue
 			}
 
-			// Нужна именно функция main() без ресивера.
-			if fd.Recv != nil || fd.Name == nil || fd.Name.Name != "main" || fd.Body == nil {
-				continue
-			}
+			funcName := fd.Name.Name
 
 			ast.Inspect(fd.Body, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
 				if !ok {
 					return true
 				}
-				if isOsExitCall(pass, call) {
-					pass.Reportf(call.Pos(), "запрещён прямой вызов os.Exit в func main; вынесите логику в отдельную функцию и возвращайте ошибку")
+
+				// Внутри main разрешаем такие вызовы.
+				if funcName == "main" {
+					return true
 				}
+
+				switch {
+				case isPanicCall(pass, call):
+					pass.Reportf(call.Pos(), "panic must not be called outside main")
+				case isOSExitCall(pass, call):
+					pass.Reportf(call.Pos(), "os.Exit must not be called outside main")
+				case isLogFatalCall(pass, call):
+					pass.Reportf(call.Pos(), "log.Fatal/Fatalf/Fatalln must not be called outside main")
+				}
+
 				return true
 			})
 		}
@@ -76,31 +58,84 @@ func runNoOsExitInMain(pass *analysis.Pass) (any, error) {
 	return nil, nil
 }
 
-// isOsExitCall определяет, является ли вызов вызовом os.Exit(...) (включая вариант с dot-import).
-func isOsExitCall(pass *analysis.Pass, call *ast.CallExpr) bool {
-	switch fun := call.Fun.(type) {
-	case *ast.SelectorExpr:
-		// os.Exit(...)
-		obj := pass.TypesInfo.Uses[fun.Sel]
-		return isOsExitObject(obj)
-
-	case *ast.Ident:
-		// Exit(...) при dot-import os (редко, но обработаем)
-		obj := pass.TypesInfo.Uses[fun]
-		return isOsExitObject(obj)
-	}
-
-	return false
-}
-
-func isOsExitObject(obj types.Object) bool {
-	fn, ok := obj.(*types.Func)
+// isPanicCall проверяет вызов встроенной функции panic(...).
+func isPanicCall(pass *analysis.Pass, call *ast.CallExpr) bool {
+	ident, ok := call.Fun.(*ast.Ident)
 	if !ok {
 		return false
 	}
-	pkg := fn.Pkg()
-	if pkg == nil {
+	if ident.Name != "panic" {
 		return false
 	}
-	return pkg.Path() == "os" && fn.Name() == "Exit"
+
+	obj := pass.TypesInfo.Uses[ident]
+	if obj == nil {
+		return false
+	}
+
+	builtin, ok := obj.(*types.Builtin)
+	if !ok {
+		return false
+	}
+
+	return builtin.Name() == "panic"
+}
+
+// isOSExitCall проверяет вызов os.Exit(...).
+func isOSExitCall(pass *analysis.Pass, call *ast.CallExpr) bool {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	if sel.Sel.Name != "Exit" {
+		return false
+	}
+
+	pkgName, ok := importedPkgName(pass, sel.X)
+	if !ok {
+		return false
+	}
+
+	return pkgName.Imported().Path() == "os"
+}
+
+// isLogFatalCall проверяет вызовы log.Fatal(...), log.Fatalf(...), log.Fatalln(...).
+func isLogFatalCall(pass *analysis.Pass, call *ast.CallExpr) bool {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+
+	switch sel.Sel.Name {
+	case "Fatal", "Fatalf", "Fatalln":
+	default:
+		return false
+	}
+
+	pkgName, ok := importedPkgName(pass, sel.X)
+	if !ok {
+		return false
+	}
+
+	return pkgName.Imported().Path() == "log"
+}
+
+// importedPkgName возвращает импортированный пакет, если выражение — это имя импортированного пакета.
+func importedPkgName(pass *analysis.Pass, expr ast.Expr) (*types.PkgName, bool) {
+	ident, ok := expr.(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+
+	obj := pass.TypesInfo.Uses[ident]
+	if obj == nil {
+		return nil, false
+	}
+
+	pkgName, ok := obj.(*types.PkgName)
+	if !ok {
+		return nil, false
+	}
+
+	return pkgName, true
 }

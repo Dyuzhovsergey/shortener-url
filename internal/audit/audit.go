@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 )
 
@@ -62,13 +61,5 @@ func (p *Publisher) Publish(ctx context.Context, event Event) error {
 		return nil
 	}
 
-	var b strings.Builder
-	b.WriteString("multiple audit errors: ")
-	for i, err := range errs {
-		if i > 0 {
-			b.WriteString("; ")
-		}
-		b.WriteString(err.Error())
-	}
-	return errors.New(b.String())
+	return fmt.Errorf("multiple audit errors: %w", errors.Join(errs...))
 }
