@@ -1,4 +1,5 @@
-package main
+// Package noexit
+package noexit
 
 import (
 	"go/ast"
@@ -7,20 +8,14 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-// noOsExitInMainAnalyzer проверяет, что:
-// - os.Exit(...)
-// - panic(...)
-// - log.Fatal(...), log.Fatalf(...), log.Fatalln(...)
-// не вызываются вне функции main.
-var noOsExitInMainAnalyzer = &analysis.Analyzer{
+// Analyzer запрещает вызывать os.Exit, panic и log.Fatal* вне обычной функции main.
+var Analyzer = &analysis.Analyzer{
 	Name: "noexit",
 	Doc:  "forbids os.Exit, panic and log.Fatal* outside main function",
-	Run:  runNoOsExitInMain,
+	Run:  run,
 }
 
-// runNoOsExitInMain проверяет, что вне func main() нет прямых вызовов
-// os.Exit(...), panic(...), log.Fatal(...), log.Fatalf(...), log.Fatalln(...).
-func runNoOsExitInMain(pass *analysis.Pass) (any, error) {
+func run(pass *analysis.Pass) (any, error) {
 	for _, file := range pass.Files {
 		for _, decl := range file.Decls {
 			fd, ok := decl.(*ast.FuncDecl)
@@ -28,7 +23,7 @@ func runNoOsExitInMain(pass *analysis.Pass) (any, error) {
 				continue
 			}
 
-			funcName := fd.Name.Name
+			insideMain := isMainFunc(fd)
 
 			ast.Inspect(fd.Body, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
@@ -36,8 +31,8 @@ func runNoOsExitInMain(pass *analysis.Pass) (any, error) {
 					return true
 				}
 
-				// Внутри main разрешаем такие вызовы.
-				if funcName == "main" {
+				// Внутри обычной func main() такие вызовы разрешаем.
+				if insideMain {
 					return true
 				}
 
@@ -56,6 +51,11 @@ func runNoOsExitInMain(pass *analysis.Pass) (any, error) {
 	}
 
 	return nil, nil
+}
+
+// isMainFunc проверяет, что это именно обычная функция main, а не метод.
+func isMainFunc(fd *ast.FuncDecl) bool {
+	return fd.Recv == nil && fd.Name != nil && fd.Name.Name == "main"
 }
 
 // isPanicCall проверяет вызов встроенной функции panic(...).
@@ -120,7 +120,7 @@ func isLogFatalCall(pass *analysis.Pass, call *ast.CallExpr) bool {
 	return pkgName.Imported().Path() == "log"
 }
 
-// importedPkgName возвращает импортированный пакет, если выражение — это имя импортированного пакета.
+// importedPkgName возвращает импортированный пакет, если expr — это имя импортированного пакета.
 func importedPkgName(pass *analysis.Pass, expr ast.Expr) (*types.PkgName, bool) {
 	ident, ok := expr.(*ast.Ident)
 	if !ok {

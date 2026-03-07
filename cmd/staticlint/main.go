@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 
+	"github.com/Dyuzhovsergey/shortener-url/internal/linter/noexit"
+
 	"github.com/gordonklaus/ineffassign/pkg/ineffassign"
 	"github.com/timakin/bodyclose/passes/bodyclose"
 	"golang.org/x/tools/go/analysis"
@@ -92,7 +94,7 @@ func main() {
 	analyzers = append(analyzers, bodyclose.Analyzer)
 
 	// noOsExitInMainAnalyzer анализатор.
-	analyzers = append(analyzers, noOsExitInMainAnalyzer)
+	analyzers = append(analyzers, noexit.Analyzer)
 
 	multichecker.Main(analyzers...)
 }
