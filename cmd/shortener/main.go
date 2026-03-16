@@ -3,7 +3,9 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/Dyuzhovsergey/shortener-url/internal/audit"
+	"github.com/Dyuzhovsergey/shortener-url/internal/certutil"
 	"github.com/Dyuzhovsergey/shortener-url/internal/config"
 	"github.com/Dyuzhovsergey/shortener-url/internal/handler"
 	"github.com/Dyuzhovsergey/shortener-url/internal/logger"
@@ -93,9 +96,37 @@ func main() {
 
 	// создаём HTTP-сервер и внедряем сервис
 	server := handler.NewHTTPServer(cfg.BaseURL, shorter, zapLogger, db, auditor)
+	router := server.Router()
+
+	if cfg.EnableHTTPS {
+		cert, err := certutil.GenerateSelfSignedCertificate(cfg.BaseURL, cfg.RunAddr)
+		if err != nil {
+			zapLogger.Fatal("failed to generate TLS certificate", zap.Error(err))
+		}
+
+		tlsConfig := &tls.Config{
+			MinVersion:   tls.VersionTLS12,
+			Certificates: []tls.Certificate{cert},
+		}
+
+		listener, err := tls.Listen("tcp", cfg.RunAddr, tlsConfig)
+		if err != nil {
+			zapLogger.Fatal("failed to start HTTPS listener", zap.Error(err))
+		}
+
+		httpServer := &http.Server{
+			Handler: router,
+		}
+
+		fmt.Printf("Server run on: https://%s\n", cfg.RunAddr)
+		if err := httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			zapLogger.Fatal("server stopped", zap.Error(err))
+		}
+		return
+	}
 
 	fmt.Printf("Server run on: http://%s\n", cfg.RunAddr)
-	if err := http.ListenAndServe(cfg.RunAddr, server.Router()); err != nil {
+	if err := http.ListenAndServe(cfg.RunAddr, router); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		zapLogger.Fatal("server stopped", zap.Error(err))
 	}
 }
