@@ -3,6 +3,7 @@ package config
 import (
 	"flag"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -21,6 +22,8 @@ type ShortenerConfig struct {
 
 	AuditFile string
 	AuditURL  string
+
+	EnableHTTPS bool
 }
 
 // Load читает конфигурацию из флагов и переменных окружения, применяя значения
@@ -41,6 +44,8 @@ func Load() *ShortenerConfig {
 
 	flagAuditFile := flag.String("audit-file", "", "path to audit log file")
 	flagAuditURL := flag.String("audit-url", "", "remote audit URL")
+
+	flagHTTPS := flag.Bool("s", false, "enable HTTPS")
 
 	flag.Parse()
 
@@ -68,7 +73,12 @@ func Load() *ShortenerConfig {
 		*flagAuditURL = envAuditURL
 	}
 
+	enableHTTPS := boolFromEnv("ENABLE_HTTPS", *flagHTTPS)
+
 	baseURL := strings.TrimRight(*flagBaseURL, "/")
+	if enableHTTPS {
+		baseURL = ensureHTTPS(baseURL)
+	}
 
 	cfg := &ShortenerConfig{
 		CharSet:         charSet,
@@ -79,6 +89,38 @@ func Load() *ShortenerConfig {
 		DatabaseDSN:     *flagDBDSN,
 		AuditFile:       strings.TrimSpace(*flagAuditFile),
 		AuditURL:        strings.TrimSpace(*flagAuditURL),
+		EnableHTTPS:     *flagHTTPS,
 	}
 	return cfg
+}
+
+// boolFromEnv читает bool-переменную окружения.
+// Если переменная не задана или распарсить её не удалось, возвращает fallback.
+func boolFromEnv(name string, fallback bool) bool {
+	value, ok := os.LookupEnv(name)
+	if !ok {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+
+	return parsed
+}
+
+// ensureHTTPS заменяет схему URL на https://, если это нужно.
+func ensureHTTPS(baseURL string) string {
+	baseURL = strings.TrimRight(baseURL, "/")
+
+	if strings.HasPrefix(baseURL, "https://") {
+		return baseURL
+	}
+
+	if strings.HasPrefix(baseURL, "http://") {
+		return "https://" + strings.TrimPrefix(baseURL, "http://")
+	}
+
+	return baseURL
 }
