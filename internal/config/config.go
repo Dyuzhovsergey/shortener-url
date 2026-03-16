@@ -41,37 +41,18 @@ func Load() *ShortenerConfig {
 	flagBaseURL := flag.String("b", defaultBaseURL, "base URL for short links")
 	flagFilePath := flag.String("f", defaultFileStorePath, "file path for URL storage")
 	flagDBDSN := flag.String("d", "", "PostgreSQL DSN")
-
 	flagAuditFile := flag.String("audit-file", "", "path to audit log file")
 	flagAuditURL := flag.String("audit-url", "", "remote audit URL")
-
 	flagHTTPS := flag.Bool("s", false, "enable HTTPS")
 
 	flag.Parse()
 
-	if envRunAddr := os.Getenv("SERVER_ADDRESS"); envRunAddr != "" {
-		*flagRunAddr = envRunAddr
-	}
-
-	if envBaseURL := os.Getenv("BASE_URL"); envBaseURL != "" {
-		*flagBaseURL = envBaseURL
-	}
-
-	if envFilePath := os.Getenv("FILE_STORAGE_PATH"); envFilePath != "" {
-		*flagFilePath = envFilePath
-	}
-
-	if envDSN := os.Getenv("DATABASE_DSN"); envDSN != "" {
-		*flagDBDSN = envDSN
-	}
-
-	if envAuditFile := os.Getenv("AUDIT_FILE"); envAuditFile != "" {
-		*flagAuditFile = envAuditFile
-	}
-
-	if envAuditURL := os.Getenv("AUDIT_URL"); envAuditURL != "" {
-		*flagAuditURL = envAuditURL
-	}
+	*flagRunAddr = stringFromEnv("SERVER_ADDRESS", *flagRunAddr)
+	*flagBaseURL = stringFromEnv("BASE_URL", *flagBaseURL)
+	*flagFilePath = stringFromEnv("FILE_STORAGE_PATH", *flagFilePath)
+	*flagDBDSN = stringFromEnv("DATABASE_DSN", *flagDBDSN)
+	*flagAuditFile = stringFromEnv("AUDIT_FILE", *flagAuditFile)
+	*flagAuditURL = stringFromEnv("AUDIT_URL", *flagAuditURL)
 
 	enableHTTPS := boolFromEnv("ENABLE_HTTPS", *flagHTTPS)
 
@@ -89,9 +70,25 @@ func Load() *ShortenerConfig {
 		DatabaseDSN:     *flagDBDSN,
 		AuditFile:       strings.TrimSpace(*flagAuditFile),
 		AuditURL:        strings.TrimSpace(*flagAuditURL),
-		EnableHTTPS:     *flagHTTPS,
+		EnableHTTPS:     enableHTTPS,
 	}
+
 	return cfg
+}
+
+// stringFromEnv читает строковую переменную окружения.
+// Если переменная не задана или содержит только пробелы, возвращает fallback.
+func stringFromEnv(name, fallback string) string {
+	value, ok := os.LookupEnv(name)
+	if !ok {
+		return fallback
+	}
+
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+
+	return value
 }
 
 // boolFromEnv читает bool-переменную окружения.
