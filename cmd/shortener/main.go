@@ -32,8 +32,12 @@ var (
 func main() {
 	printBuildInfo()
 
-	// парсим флаги
-	cfg := config.Load()
+	// парсим конфигурацию
+	cfg, cfgErr := config.Load()
+	if cfgErr != nil {
+		fmt.Println("config error:", cfgErr)
+		return
+	}
 
 	// инициализируем zap logger
 	zapLogger := logger.Init()

@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -42,7 +43,7 @@ type fileConfig struct {
 }
 
 // Load читает конфигурацию из флагов, JSON-файла и переменных окружения.
-func Load() *ShortenerConfig {
+func Load() (*ShortenerConfig, error) {
 	const (
 		defaultRunAddr       = "localhost:8080"
 		defaultBaseURL       = "http://localhost:8080"
@@ -63,22 +64,25 @@ func Load() *ShortenerConfig {
 
 	// 3. Если файл задан — подмешиваем его значения поверх defaults.
 	if configPath != "" {
-		if fc, err := loadFileConfig(configPath); err == nil {
-			if strings.TrimSpace(fc.ServerAddress) != "" {
-				runAddr = fc.ServerAddress
-			}
-			if strings.TrimSpace(fc.BaseURL) != "" {
-				baseURL = fc.BaseURL
-			}
-			if strings.TrimSpace(fc.FileStoragePath) != "" {
-				fileStoragePath = fc.FileStoragePath
-			}
-			if fc.DatabaseDSN != "" {
-				databaseDSN = fc.DatabaseDSN
-			}
-			if fc.EnableHTTPS != nil {
-				enableHTTPS = *fc.EnableHTTPS
-			}
+		fc, err := loadFileConfig(configPath)
+		if err != nil {
+			return nil, fmt.Errorf("cannot load config file %q: %w", configPath, err)
+		}
+
+		if strings.TrimSpace(fc.ServerAddress) != "" {
+			runAddr = fc.ServerAddress
+		}
+		if strings.TrimSpace(fc.BaseURL) != "" {
+			baseURL = fc.BaseURL
+		}
+		if strings.TrimSpace(fc.FileStoragePath) != "" {
+			fileStoragePath = fc.FileStoragePath
+		}
+		if strings.TrimSpace(fc.DatabaseDSN) != "" {
+			databaseDSN = fc.DatabaseDSN
+		}
+		if fc.EnableHTTPS != nil {
+			enableHTTPS = *fc.EnableHTTPS
 		}
 	}
 
@@ -87,10 +91,8 @@ func Load() *ShortenerConfig {
 	flagBaseURL := flag.String("b", baseURL, "base URL for short links")
 	flagFilePath := flag.String("f", fileStoragePath, "file path for URL storage")
 	flagDBDSN := flag.String("d", databaseDSN, "PostgreSQL DSN")
-
 	flagAuditFile := flag.String("audit-file", "", "path to audit log file")
 	flagAuditURL := flag.String("audit-url", "", "remote audit URL")
-
 	flagHTTPS := flag.Bool("s", enableHTTPS, "enable HTTPS")
 
 	// Поддержка -c и -config.
@@ -126,7 +128,7 @@ func Load() *ShortenerConfig {
 		EnableHTTPS:     enableHTTPS,
 	}
 
-	return cfg
+	return cfg, nil
 }
 
 // findConfigPath ищет путь к JSON-конфигу.
