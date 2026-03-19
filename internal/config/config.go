@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"flag"
 	"os"
 	"strconv"
@@ -9,8 +10,13 @@ import (
 
 // ShortenerConfig описывает параметры запуска сервиса.
 //
-// Значения заполняются из флагов командной строки и переменных окружения.
-// Переменные окружения имеют приоритет над флагами.
+// Значения заполняются из:
+// 1. значений по умолчанию,
+// 2. файла конфигурации,
+// 3. флагов командной строки,
+// 4. переменных окружения.
+//
+// Приоритет ENV > flags > JSON > Default.
 type ShortenerConfig struct {
 	CharSet  string
 	LengthID int
@@ -26,8 +32,16 @@ type ShortenerConfig struct {
 	EnableHTTPS bool
 }
 
-// Load читает конфигурацию из флагов и переменных окружения, применяя значения
-// по умолчанию.
+// fileConfig описывает формат JSON-конфига.
+type fileConfig struct {
+	ServerAddress   string `json:"server_address"`
+	BaseURL         string `json:"base_url"`
+	FileStoragePath string `json:"file_storage_path"`
+	DatabaseDSN     string `json:"database_dsn"`
+	EnableHTTPS     *bool  `json:"enable_https"`
+}
+
+// Load читает конфигурацию из флагов, JSON-файла и переменных окружения.
 func Load() *ShortenerConfig {
 	const (
 		defaultRunAddr       = "localhost:8080"
@@ -37,16 +51,55 @@ func Load() *ShortenerConfig {
 		defaultFileStorePath = "shortener-storage.json"
 	)
 
-	flagRunAddr := flag.String("a", defaultRunAddr, "server address, e.g. ':8080'")
-	flagBaseURL := flag.String("b", defaultBaseURL, "base URL for short links")
-	flagFilePath := flag.String("f", defaultFileStorePath, "file path for URL storage")
-	flagDBDSN := flag.String("d", "", "PostgreSQL DSN")
+	// 1. Сначала определяем путь к JSON-конфигу.
+	configPath := findConfigPath()
+
+	// 2. Берём значения по умолчанию как базу.
+	runAddr := defaultRunAddr
+	baseURL := defaultBaseURL
+	fileStoragePath := defaultFileStorePath
+	databaseDSN := ""
+	enableHTTPS := false
+
+	// 3. Если файл задан — подмешиваем его значения поверх defaults.
+	if configPath != "" {
+		if fc, err := loadFileConfig(configPath); err == nil {
+			if strings.TrimSpace(fc.ServerAddress) != "" {
+				runAddr = fc.ServerAddress
+			}
+			if strings.TrimSpace(fc.BaseURL) != "" {
+				baseURL = fc.BaseURL
+			}
+			if strings.TrimSpace(fc.FileStoragePath) != "" {
+				fileStoragePath = fc.FileStoragePath
+			}
+			if fc.DatabaseDSN != "" {
+				databaseDSN = fc.DatabaseDSN
+			}
+			if fc.EnableHTTPS != nil {
+				enableHTTPS = *fc.EnableHTTPS
+			}
+		}
+	}
+
+	// 4. Теперь объявляем флаги уже с учётом значений из файла.
+	flagRunAddr := flag.String("a", runAddr, "server address, e.g. ':8080'")
+	flagBaseURL := flag.String("b", baseURL, "base URL for short links")
+	flagFilePath := flag.String("f", fileStoragePath, "file path for URL storage")
+	flagDBDSN := flag.String("d", databaseDSN, "PostgreSQL DSN")
+
 	flagAuditFile := flag.String("audit-file", "", "path to audit log file")
 	flagAuditURL := flag.String("audit-url", "", "remote audit URL")
-	flagHTTPS := flag.Bool("s", false, "enable HTTPS")
+
+	flagHTTPS := flag.Bool("s", enableHTTPS, "enable HTTPS")
+
+	// Поддержка -c и -config.
+	flag.String("c", configPath, "path to JSON config file")
+	flag.String("config", configPath, "path to JSON config file")
 
 	flag.Parse()
 
+	// 5. Поверх всего накладываем ENV — у них самый высокий приоритет.
 	*flagRunAddr = stringFromEnv("SERVER_ADDRESS", *flagRunAddr)
 	*flagBaseURL = stringFromEnv("BASE_URL", *flagBaseURL)
 	*flagFilePath = stringFromEnv("FILE_STORAGE_PATH", *flagFilePath)
@@ -54,9 +107,9 @@ func Load() *ShortenerConfig {
 	*flagAuditFile = stringFromEnv("AUDIT_FILE", *flagAuditFile)
 	*flagAuditURL = stringFromEnv("AUDIT_URL", *flagAuditURL)
 
-	enableHTTPS := boolFromEnv("ENABLE_HTTPS", *flagHTTPS)
+	enableHTTPS = boolFromEnv("ENABLE_HTTPS", *flagHTTPS)
 
-	baseURL := strings.TrimRight(*flagBaseURL, "/")
+	baseURL = strings.TrimRight(*flagBaseURL, "/")
 	if enableHTTPS {
 		baseURL = ensureHTTPS(baseURL)
 	}
@@ -65,15 +118,60 @@ func Load() *ShortenerConfig {
 		CharSet:         charSet,
 		LengthID:        lengthID,
 		BaseURL:         baseURL,
-		RunAddr:         *flagRunAddr,
-		FileStoragePath: *flagFilePath,
-		DatabaseDSN:     *flagDBDSN,
+		RunAddr:         strings.TrimSpace(*flagRunAddr),
+		FileStoragePath: strings.TrimSpace(*flagFilePath),
+		DatabaseDSN:     strings.TrimSpace(*flagDBDSN),
 		AuditFile:       strings.TrimSpace(*flagAuditFile),
 		AuditURL:        strings.TrimSpace(*flagAuditURL),
 		EnableHTTPS:     enableHTTPS,
 	}
 
 	return cfg
+}
+
+// findConfigPath ищет путь к JSON-конфигу.
+// Приоритет: флаги -c/-config, затем переменная окружения CONFIG.
+func findConfigPath() string {
+	envPath := strings.TrimSpace(os.Getenv("CONFIG"))
+
+	var configPath string
+	args := os.Args[1:]
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+
+		switch {
+		case arg == "-c" || arg == "-config":
+			if i+1 < len(args) {
+				configPath = strings.TrimSpace(args[i+1])
+			}
+		case strings.HasPrefix(arg, "-c="):
+			configPath = strings.TrimSpace(strings.TrimPrefix(arg, "-c="))
+		case strings.HasPrefix(arg, "-config="):
+			configPath = strings.TrimSpace(strings.TrimPrefix(arg, "-config="))
+		}
+	}
+
+	if configPath != "" {
+		return configPath
+	}
+
+	return envPath
+}
+
+// loadFileConfig читает JSON-конфиг из файла.
+func loadFileConfig(path string) (*fileConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var cfg fileConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+
+	return &cfg, nil
 }
 
 // stringFromEnv читает строковую переменную окружения.
