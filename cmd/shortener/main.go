@@ -8,7 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"go.uber.org/zap"
@@ -43,7 +47,7 @@ func main() {
 	zapLogger := logger.Init()
 	defer zapLogger.Sync()
 
-	// ---------------- Аудит (паттерн «Наблюдатель») ----------------
+	// ---------------- Аудит ----------------
 	auditor := audit.NewPublisher()
 
 	var fileObserver *audit.FileObserver
@@ -86,7 +90,7 @@ func main() {
 	} else if cfg.FileStoragePath != "" {
 		fileRepo, err := repository.NewFileRepository(cfg.FileStoragePath)
 		if err != nil {
-			zapLogger.Fatal("cannot init file repository: %v", zap.Error(err))
+			zapLogger.Fatal("cannot init file repository", zap.Error(err))
 		}
 		repo = fileRepo
 		zapLogger.Info("using file repository", zap.String("path", cfg.FileStoragePath))
@@ -95,43 +99,74 @@ func main() {
 		zapLogger.Info("using in-memory repository")
 	}
 
-	// создаём сервис и внедряем репозиторий
+	// создаём сервис
 	shorter := service.NewShorterService(repo, cfg)
 
-	// создаём HTTP-сервер и внедряем сервис
+	// создаём HTTP-сервер
 	server := handler.NewHTTPServer(cfg.BaseURL, shorter, zapLogger, db, auditor)
 	router := server.Router()
 
-	if cfg.EnableHTTPS {
-		cert, err := certutil.GenerateSelfSignedCertificate(cfg.BaseURL, cfg.RunAddr)
-		if err != nil {
-			zapLogger.Fatal("failed to generate TLS certificate", zap.Error(err))
-		}
-
-		tlsConfig := &tls.Config{
-			MinVersion:   tls.VersionTLS12,
-			Certificates: []tls.Certificate{cert},
-		}
-
-		listener, err := tls.Listen("tcp", cfg.RunAddr, tlsConfig)
-		if err != nil {
-			zapLogger.Fatal("failed to start HTTPS listener", zap.Error(err))
-		}
-
-		httpServer := &http.Server{
-			Handler: router,
-		}
-
-		fmt.Printf("Server run on: https://%s\n", cfg.RunAddr)
-		if err := httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			zapLogger.Fatal("server stopped", zap.Error(err))
-		}
-		return
+	// создаём http.Server (ВАЖНО для graceful shutdown)
+	srv := &http.Server{
+		Addr:    cfg.RunAddr,
+		Handler: router,
 	}
 
-	fmt.Printf("Server run on: http://%s\n", cfg.RunAddr)
-	if err := http.ListenAndServe(cfg.RunAddr, router); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		zapLogger.Fatal("server stopped", zap.Error(err))
+	// ---- запуск сервера в горутине ----
+	go func() {
+		if cfg.EnableHTTPS {
+			cert, err := certutil.GenerateSelfSignedCertificate(cfg.BaseURL, cfg.RunAddr)
+			if err != nil {
+				zapLogger.Fatal("failed to generate TLS certificate", zap.Error(err))
+			}
+
+			tlsConfig := &tls.Config{
+				MinVersion:   tls.VersionTLS12,
+				Certificates: []tls.Certificate{cert},
+			}
+
+			listener, err := tls.Listen("tcp", cfg.RunAddr, tlsConfig)
+			if err != nil {
+				zapLogger.Fatal("failed to start HTTPS listener", zap.Error(err))
+			}
+
+			zapLogger.Info("server started (HTTPS)", zap.String("addr", cfg.RunAddr))
+
+			if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				zapLogger.Fatal("server failed", zap.Error(err))
+			}
+			return
+		}
+
+		zapLogger.Info("server started (HTTP)", zap.String("addr", cfg.RunAddr))
+
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			zapLogger.Fatal("server failed", zap.Error(err))
+		}
+	}()
+
+	// ---- обработка сигналов ----
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+
+	sig := <-quit
+	zapLogger.Info("shutdown signal received", zap.String("signal", sig.String()))
+
+	// ---- graceful shutdown ----
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		zapLogger.Error("server shutdown failed", zap.Error(err))
+	} else {
+		zapLogger.Info("server stopped gracefully")
+	}
+
+	// ---- закрытие ресурсов ----
+	if db != nil {
+		if err := db.Close(); err != nil {
+			zapLogger.Error("failed to close DB", zap.Error(err))
+		}
 	}
 }
 
