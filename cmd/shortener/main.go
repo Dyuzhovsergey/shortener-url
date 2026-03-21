@@ -106,7 +106,7 @@ func main() {
 	server := handler.NewHTTPServer(cfg.BaseURL, shorter, zapLogger, db, auditor)
 	router := server.Router()
 
-	// создаём http.Server (ВАЖНО для graceful shutdown)
+	// создаём http.Server
 	srv := &http.Server{
 		Addr:    cfg.RunAddr,
 		Handler: router,
