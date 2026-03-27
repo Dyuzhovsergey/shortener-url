@@ -368,6 +368,5 @@ func (fr *FileRepository) Stats(ctx context.Context) (Stats, error) {
 			stats.Users++
 		}
 	}
-
 	return stats, nil
 }
