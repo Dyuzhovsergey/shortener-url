@@ -120,15 +120,14 @@ func Load() (*ShortenerConfig, error) {
 	enableHTTPS = boolFromEnv("ENABLE_HTTPS", *flagHTTPS)
 
 	baseURL = strings.TrimRight(*flagBaseURL, "/")
-	if enableHTTPS {
-		baseURL = ensureHTTPS(baseURL)
-	}
-
 	trustedSubnet = strings.TrimSpace(*flagTrustedSubnet)
 	if trustedSubnet != "" {
 		if _, _, err := net.ParseCIDR(trustedSubnet); err != nil {
 			return nil, fmt.Errorf("invalid trusted_subnet %q: %w", trustedSubnet, err)
 		}
+	}
+	if enableHTTPS {
+		baseURL = ensureHTTPS(baseURL)
 	}
 
 	cfg := &ShortenerConfig{
@@ -140,6 +139,7 @@ func Load() (*ShortenerConfig, error) {
 		DatabaseDSN:     strings.TrimSpace(*flagDBDSN),
 		AuditFile:       strings.TrimSpace(*flagAuditFile),
 		AuditURL:        strings.TrimSpace(*flagAuditURL),
+		TrustedSubnet:   trustedSubnet,
 		EnableHTTPS:     enableHTTPS,
 	}
 
