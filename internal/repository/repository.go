@@ -15,6 +15,12 @@ type UserURL struct {
 	OriginalURL string `json:"original_url"`
 }
 
+// Stats содержит агрегированную статистику сервиса.
+type Stats struct {
+	URLs  int `json:"urls"`
+	Users int `json:"users"`
+}
+
 // Repository описывает поведение хранилища сокращённых ссылок.
 type Repository interface {
 	// Save сохраняет соответствие shortID -> originalURL и привязывает его к userID (если задан).
