@@ -112,3 +112,18 @@ func (r *PostgresRepository) DeleteUserURLs(ctx context.Context, userID string, 
 	_, err := r.db.ExecContext(ctx, q, userID, shortIDs)
 	return err
 }
+
+// Stats возвращает агрегированную статистику сервиса.
+func (r *PostgresRepository) Stats(ctx context.Context) (Stats, error) {
+	const q = `
+		SELECT COUNT(*), COUNT(DISTINCT NULLIF(user_id, ''))
+		FROM short_urls;
+	`
+
+	var stats Stats
+	if err := r.db.QueryRowContext(ctx, q).Scan(&stats.URLs, &stats.Users); err != nil {
+		return Stats{}, err
+	}
+
+	return stats, nil
+}
