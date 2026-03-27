@@ -355,3 +355,19 @@ func (fr *FileRepository) appendRecordLocked(rec urlRecord) error {
 	enc := json.NewEncoder(f) // без SetIndent
 	return enc.Encode(rec)    // Encode сам добавит "\n"
 }
+
+func (fr *FileRepository) Stats(ctx context.Context) (Stats, error) {
+	_ = ctx
+
+	fr.mu.RLock()
+	defer fr.mu.RUnlock()
+
+	stats := Stats{URLs: len(fr.data)}
+	for _, m := range fr.userIndex {
+		if len(m) > 0 {
+			stats.Users++
+		}
+	}
+
+	return stats, nil
+}
