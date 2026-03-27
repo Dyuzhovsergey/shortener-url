@@ -10,6 +10,12 @@ type ShortenResponse struct {
 	Result string `json:"result"`
 }
 
+// StatsResponse — ответ для GET /api/internal/stats.
+type StatsResponse struct {
+	URLs  int `json:"urls"`
+	Users int `json:"users"`
+}
+
 // BatchShortenRequestItem — элемент батч-запроса POST /api/shorten/batch.
 type BatchShortenRequestItem struct {
 	CorrelationID string `json:"correlation_id"`
