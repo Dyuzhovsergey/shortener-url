@@ -36,6 +36,9 @@ type Repository interface {
 
 	// DeleteUserURLs помечает ссылки пользователя как удалённые.
 	DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error
+
+	// Stats возвращает агрегированную статистику сервиса.
+	Stats(ctx context.Context) (Stats, error)
 }
 
 // ErrOriginalAlreadyExists означает, что originalURL уже сохранён в системе.
