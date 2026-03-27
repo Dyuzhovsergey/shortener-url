@@ -48,7 +48,7 @@ func newTestServer() *httptest.Server {
 
 	aud := audit.NewPublisher()
 
-	srv := handler.NewHTTPServer(testBaseURL, svc, log, okDB{}, aud)
+	srv := handler.NewHTTPServer(testBaseURL, cfg.TrustedSubnet, svc, log, okDB{}, aud)
 
 	return httptest.NewServer(srv.Router())
 }
