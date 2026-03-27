@@ -163,6 +163,11 @@ func (svc *ShorterService) GetUserURLs(ctx context.Context) ([]repository.UserUR
 	return svc.repo.GetUserURLs(ctx, userID)
 }
 
+// GetStats возвращает агрегированную статистику сервиса.
+func (svc *ShorterService) GetStats(ctx context.Context) (repository.Stats, error) {
+	return svc.repo.Stats(ctx)
+}
+
 // CreateShortURLBatch создаёт короткие ссылки для батч-запроса.
 // При ошибке валидации любого URL возвращает ошибку.
 // CreateShortURLBatch создаёт короткие ссылки для батч-запроса.
