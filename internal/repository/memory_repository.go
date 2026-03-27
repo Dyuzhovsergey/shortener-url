@@ -127,3 +127,19 @@ func (repo *MemoryRepository) DeleteUserURLs(ctx context.Context, userID string,
 	}
 	return nil
 }
+
+func (repo *MemoryRepository) Stats(ctx context.Context) (Stats, error) {
+	_ = ctx
+
+	repo.mu.RLock()
+	defer repo.mu.RUnlock()
+
+	stats := Stats{URLs: len(repo.data)}
+	for _, set := range repo.userIndex {
+		if len(set) > 0 {
+			stats.Users++
+		}
+	}
+
+	return stats, nil
+}
