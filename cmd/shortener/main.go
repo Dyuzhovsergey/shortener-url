@@ -103,7 +103,7 @@ func main() {
 	shorter := service.NewShorterService(repo, cfg)
 
 	// создаём HTTP-сервер
-	server := handler.NewHTTPServer(cfg.BaseURL, shorter, zapLogger, db, auditor)
+	server := handler.NewHTTPServer(cfg.BaseURL, cfg.TrustedSubnet, shorter, zapLogger, db, auditor)
 	router := server.Router()
 
 	// создаём http.Server

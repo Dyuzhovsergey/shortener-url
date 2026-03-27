@@ -29,10 +29,11 @@ func (f *fakeDB) PingContext(ctx context.Context) error { return f.err }
 // makeTestConfig — возвращает тестовую конфигурацию.
 func makeTestConfig() *config.ShortenerConfig {
 	return &config.ShortenerConfig{
-		CharSet:  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-		LengthID: 8,
-		BaseURL:  "http://localhost:8080",
-		RunAddr:  ":8080",
+		CharSet:       "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+		LengthID:      8,
+		BaseURL:       "http://localhost:8080",
+		RunAddr:       ":8080",
+		TrustedSubnet: "",
 	}
 }
 
@@ -44,7 +45,7 @@ func setupTestServer(auditor *audit.Publisher) *HTTPServer {
 	logger := zap.NewNop()
 	db := &fakeDB{err: nil}
 
-	return NewHTTPServer(cfg.BaseURL, svc, logger, db, auditor)
+	return NewHTTPServer(cfg.BaseURL, cfg.TrustedSubnet, svc, logger, db, auditor)
 }
 
 func requireNoErr(t *testing.T, err error) {
@@ -181,7 +182,7 @@ func TestHandlePing_OK(t *testing.T) {
 	db := &fakeDB{err: nil}
 	auditor := audit.NewPublisher()
 
-	srv := NewHTTPServer(cfg.BaseURL, svc, logger, db, auditor)
+	srv := NewHTTPServer(cfg.BaseURL, cfg.TrustedSubnet, svc, logger, db, auditor)
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	rec := httptest.NewRecorder()
@@ -201,7 +202,7 @@ func TestHandlePing_DBError(t *testing.T) {
 	db := &fakeDB{err: errors.New("db down")}
 	auditor := audit.NewPublisher()
 
-	srv := NewHTTPServer(cfg.BaseURL, svc, logger, db, auditor)
+	srv := NewHTTPServer(cfg.BaseURL, cfg.TrustedSubnet, svc, logger, db, auditor)
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	rec := httptest.NewRecorder()
@@ -327,6 +328,97 @@ func TestHandleDeleteUserURLs_AcceptsAndEventuallyGone(t *testing.T) {
 		}
 
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestHandleStats_ForbiddenWhenSubnetEmpty(t *testing.T) {
+	srv := setupTestServer(nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/internal/stats", nil)
+	req.Header.Set("X-Real-IP", "192.168.1.10")
+
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rec.Code)
+	}
+}
+
+func TestHandleStats_ForbiddenWhenIPOutsideTrustedSubnet(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	cfg := makeTestConfig()
+	cfg.TrustedSubnet = "192.168.1.0/24"
+	svc := service.NewShorterService(repo, cfg)
+
+	logger := zap.NewNop()
+	db := &fakeDB{err: nil}
+	auditor := audit.NewPublisher()
+
+	srv := NewHTTPServer(cfg.BaseURL, cfg.TrustedSubnet, svc, logger, db, auditor)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/internal/stats", nil)
+	req.Header.Set("X-Real-IP", "10.0.0.1")
+
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rec.Code)
+	}
+}
+
+func TestHandleStats_OK(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	cfg := makeTestConfig()
+	cfg.TrustedSubnet = "192.168.1.0/24"
+	svc := service.NewShorterService(repo, cfg)
+
+	logger := zap.NewNop()
+	db := &fakeDB{err: nil}
+	auditor := audit.NewPublisher()
+
+	srv := NewHTTPServer(cfg.BaseURL, cfg.TrustedSubnet, svc, logger, db, auditor)
+	router := srv.Router()
+
+	for _, originalURL := range []string{
+		"https://example.com/1",
+		"https://example.com/2",
+		"https://example.com/3",
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(originalURL))
+		req.Header.Set("Content-Type", "text/plain")
+
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusCreated {
+			b, _ := io.ReadAll(rec.Result().Body)
+			t.Fatalf("expected 201, got %d, body=%q", rec.Code, string(b))
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/internal/stats", nil)
+	req.Header.Set("X-Real-IP", "192.168.1.15")
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		b, _ := io.ReadAll(rec.Result().Body)
+		t.Fatalf("expected 200, got %d, body=%q", rec.Code, string(b))
+	}
+
+	var resp model.StatsResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if resp.URLs != 3 {
+		t.Fatalf("expected urls=3, got %d", resp.URLs)
+	}
+	if resp.Users != 3 {
+		t.Fatalf("expected users=3, got %d", resp.Users)
 	}
 }
 

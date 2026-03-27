@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -27,21 +28,31 @@ type DBPinger interface {
 
 // HTTPServer — слой HTTP, знает про сервис, но не про репозиторий.
 type HTTPServer struct {
-	baseURL string
-	shorter *service.ShorterService
-	logger  *zap.Logger
-	db      DBPinger
-	audit   *audit.Publisher
+	baseURL       string
+	trustedSubnet *net.IPNet
+	shorter       *service.ShorterService
+	logger        *zap.Logger
+	db            DBPinger
+	audit         *audit.Publisher
 }
 
 // NewHTTPServer — конструктор с внедрением зависимости (DI).
-func NewHTTPServer(baseURL string, shorter *service.ShorterService, logger *zap.Logger, db DBPinger, auditor *audit.Publisher) *HTTPServer {
+func NewHTTPServer(baseURL string, trustedSubnet string, shorter *service.ShorterService, logger *zap.Logger, db DBPinger, auditor *audit.Publisher) *HTTPServer {
+	var subnet *net.IPNet
+	if strings.TrimSpace(trustedSubnet) != "" {
+		_, parsedSubnet, err := net.ParseCIDR(strings.TrimSpace(trustedSubnet))
+		if err == nil {
+			subnet = parsedSubnet
+		}
+	}
+
 	return &HTTPServer{
-		baseURL: baseURL,
-		shorter: shorter,
-		logger:  logger,
-		db:      db,
-		audit:   auditor,
+		baseURL:       baseURL,
+		trustedSubnet: subnet,
+		shorter:       shorter,
+		logger:        logger,
+		db:            db,
+		audit:         auditor,
 	}
 }
 
@@ -61,6 +72,7 @@ func (srv *HTTPServer) Router() http.Handler {
 	r.Post("/", srv.handlePost)
 	r.Post("/api/shorten", srv.handleAPIPost)
 	r.Get("/ping", srv.handlePing)
+	r.Get("/api/internal/stats", srv.handleStats)
 	r.Post("/api/shorten/batch", srv.handleAPIPostBatch)
 	r.Delete("/api/user/urls", srv.handleUserURLsDelete)
 	r.Get("/api/user/urls", srv.handleUserURLs)
@@ -95,6 +107,46 @@ func (srv *HTTPServer) handleGet(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Location", originalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
+}
+
+func (srv *HTTPServer) isTrustedRequest(r *http.Request) bool {
+	if srv.trustedSubnet == nil {
+		return false
+	}
+
+	realIP := strings.TrimSpace(r.Header.Get("X-Real-IP"))
+	if realIP == "" {
+		return false
+	}
+
+	ip := net.ParseIP(realIP)
+	if ip == nil {
+		return false
+	}
+
+	return srv.trustedSubnet.Contains(ip)
+}
+
+// GET /api/internal/stats
+func (srv *HTTPServer) handleStats(w http.ResponseWriter, r *http.Request) {
+	if !srv.isTrustedRequest(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	stats, err := srv.shorter.GetStats(r.Context())
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := model.StatsResponse{URLs: stats.URLs, Users: stats.Users}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		srv.logger.Error("failed to write JSON stats response", zap.Error(err))
+		return
+	}
 }
 
 // POST /
