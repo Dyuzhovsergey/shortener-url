@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -27,8 +28,9 @@ type ShortenerConfig struct {
 	FileStoragePath string
 	DatabaseDSN     string
 
-	AuditFile string
-	AuditURL  string
+	AuditFile     string
+	AuditURL      string
+	TrustedSubnet string
 
 	EnableHTTPS bool
 }
@@ -39,6 +41,7 @@ type fileConfig struct {
 	BaseURL         string `json:"base_url"`
 	FileStoragePath string `json:"file_storage_path"`
 	DatabaseDSN     string `json:"database_dsn"`
+	TrustedSubnet   string `json:"trusted_subnet"`
 	EnableHTTPS     *bool  `json:"enable_https"`
 }
 
@@ -59,6 +62,7 @@ func Load() (*ShortenerConfig, error) {
 	runAddr := defaultRunAddr
 	baseURL := defaultBaseURL
 	fileStoragePath := defaultFileStorePath
+	trustedSubnet := ""
 	databaseDSN := ""
 	enableHTTPS := false
 
@@ -81,6 +85,8 @@ func Load() (*ShortenerConfig, error) {
 		if strings.TrimSpace(fc.DatabaseDSN) != "" {
 			databaseDSN = fc.DatabaseDSN
 		}
+		trustedSubnet = strings.TrimSpace(fc.TrustedSubnet)
+
 		if fc.EnableHTTPS != nil {
 			enableHTTPS = *fc.EnableHTTPS
 		}
@@ -91,6 +97,7 @@ func Load() (*ShortenerConfig, error) {
 	flagBaseURL := flag.String("b", baseURL, "base URL for short links")
 	flagFilePath := flag.String("f", fileStoragePath, "file path for URL storage")
 	flagDBDSN := flag.String("d", databaseDSN, "PostgreSQL DSN")
+	flagTrustedSubnet := flag.String("t", trustedSubnet, "trusted subnet in CIDR notation")
 	flagAuditFile := flag.String("audit-file", "", "path to audit log file")
 	flagAuditURL := flag.String("audit-url", "", "remote audit URL")
 	flagHTTPS := flag.Bool("s", enableHTTPS, "enable HTTPS")
@@ -106,6 +113,7 @@ func Load() (*ShortenerConfig, error) {
 	*flagBaseURL = stringFromEnv("BASE_URL", *flagBaseURL)
 	*flagFilePath = stringFromEnv("FILE_STORAGE_PATH", *flagFilePath)
 	*flagDBDSN = stringFromEnv("DATABASE_DSN", *flagDBDSN)
+	*flagTrustedSubnet = stringFromEnvAllowEmpty("TRUSTED_SUBNET", *flagTrustedSubnet)
 	*flagAuditFile = stringFromEnv("AUDIT_FILE", *flagAuditFile)
 	*flagAuditURL = stringFromEnv("AUDIT_URL", *flagAuditURL)
 
@@ -114,6 +122,13 @@ func Load() (*ShortenerConfig, error) {
 	baseURL = strings.TrimRight(*flagBaseURL, "/")
 	if enableHTTPS {
 		baseURL = ensureHTTPS(baseURL)
+	}
+
+	trustedSubnet = strings.TrimSpace(*flagTrustedSubnet)
+	if trustedSubnet != "" {
+		if _, _, err := net.ParseCIDR(trustedSubnet); err != nil {
+			return nil, fmt.Errorf("invalid trusted_subnet %q: %w", trustedSubnet, err)
+		}
 	}
 
 	cfg := &ShortenerConfig{
@@ -191,6 +206,17 @@ func stringFromEnv(name, fallback string) string {
 	return value
 }
 
+// stringFromEnvAllowEmpty читает строковую переменную окружения.
+// Если переменная задана, возвращает её значение даже если оно пустое.
+func stringFromEnvAllowEmpty(name, fallback string) string {
+	value, ok := os.LookupEnv(name)
+	if !ok {
+		return fallback
+	}
+
+	return value
+}
+
 // boolFromEnv читает bool-переменную окружения.
 // Если переменная не задана или распарсить её не удалось, возвращает fallback.
 func boolFromEnv(name string, fallback bool) bool {
@@ -207,7 +233,7 @@ func boolFromEnv(name string, fallback bool) bool {
 	return parsed
 }
 
-// ensureHTTPS заменяет схему URL на https://, если это нужно.
+// ensureHTTPS заменяет схему URL на https://
 func ensureHTTPS(baseURL string) string {
 	baseURL = strings.TrimRight(baseURL, "/")
 
