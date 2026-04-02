@@ -27,6 +27,11 @@ func UserIDFromContext(ctx context.Context) (string, bool) {
 	return id, true
 }
 
+// WithUserID кладёт userID в context.Context.
+func WithUserID(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, userIDKey{}, userID)
+}
+
 // generateUserID генерирует случайный userID (32 hex-символа).
 func generateUserID() (string, error) {
 	var b [16]byte
@@ -34,6 +39,11 @@ func generateUserID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b[:]), nil
+}
+
+// GenerateUserID генерирует случайный userID.
+func GenerateUserID() (string, error) {
+	return generateUserID()
 }
 
 // signUserID строит HMAC-подпись от userID.
@@ -47,6 +57,11 @@ func signUserID(userID string) string {
 func buildCookieValue(userID string) string {
 	sig := signUserID(userID)
 	return userID + "." + sig
+}
+
+// BuildAuthValue строит строку авторизации формата userID.signature.
+func BuildAuthValue(userID string) string {
+	return buildCookieValue(userID)
 }
 
 // parseAndVerifyCookie разбирает значение куки и проверяет подпись.
@@ -65,6 +80,16 @@ func parseAndVerifyCookie(val string) (string, bool) {
 		return "", false
 	}
 	return userID, true
+}
+
+// ParseAndVerifyAuthValue проверяет значение авторизации.
+// Поддерживает как raw-значение userID.signature, так и Bearer <value>.
+func ParseAndVerifyAuthValue(val string) (string, bool) {
+	val = strings.TrimSpace(val)
+	if strings.HasPrefix(strings.ToLower(val), "bearer ") {
+		val = strings.TrimSpace(val[7:])
+	}
+	return parseAndVerifyCookie(val)
 }
 
 // AuthMiddleware - выдаёт/проверяет подписанную cookie и кладёт userID в контекст запроса.
