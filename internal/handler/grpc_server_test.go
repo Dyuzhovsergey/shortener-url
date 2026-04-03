@@ -10,6 +10,7 @@ import (
 	pb "github.com/Dyuzhovsergey/shortener-url/api"
 	"github.com/Dyuzhovsergey/shortener-url/internal/audit"
 	"github.com/Dyuzhovsergey/shortener-url/internal/config"
+	"github.com/Dyuzhovsergey/shortener-url/internal/middleware"
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 	"github.com/Dyuzhovsergey/shortener-url/internal/service"
 	"go.uber.org/zap"
@@ -39,7 +40,7 @@ func newGRPCTestClient(t *testing.T) (pb.ShortenerServiceClient, func()) {
 	shorter := service.NewShorterService(repo, cfg)
 
 	grpcSrv := grpc.NewServer(
-		grpc.UnaryInterceptor(GRPCAuthInterceptor(zap.NewNop())),
+		grpc.UnaryInterceptor(middleware.GRPCAuthInterceptor(zap.NewNop())),
 	)
 
 	grpcHandler := NewGRPCServer(cfg.BaseURL, shorter, zap.NewNop(), audit.NewPublisher())

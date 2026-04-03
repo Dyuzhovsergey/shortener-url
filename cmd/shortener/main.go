@@ -26,6 +26,7 @@ import (
 	"github.com/Dyuzhovsergey/shortener-url/internal/config"
 	"github.com/Dyuzhovsergey/shortener-url/internal/handler"
 	"github.com/Dyuzhovsergey/shortener-url/internal/logger"
+	"github.com/Dyuzhovsergey/shortener-url/internal/middleware"
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 	"github.com/Dyuzhovsergey/shortener-url/internal/service"
 	"github.com/Dyuzhovsergey/shortener-url/migrations"
@@ -125,7 +126,7 @@ func main() {
 	grpcHandler := handler.NewGRPCServer(cfg.BaseURL, shorter, zapLogger, auditor)
 
 	grpcSrv := grpc.NewServer(
-		grpc.UnaryInterceptor(handler.GRPCAuthInterceptor(zapLogger)),
+		grpc.UnaryInterceptor(middleware.GRPCAuthInterceptor(zapLogger)),
 	)
 	pb.RegisterShortenerServiceServer(grpcSrv, grpcHandler)
 
