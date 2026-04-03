@@ -9,16 +9,18 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/soheilhy/cmux"
 	"go.uber.org/zap"
 
+	pb "github.com/Dyuzhovsergey/shortener-url/api"
 	"github.com/Dyuzhovsergey/shortener-url/internal/audit"
 	"github.com/Dyuzhovsergey/shortener-url/internal/certutil"
 	"github.com/Dyuzhovsergey/shortener-url/internal/config"
@@ -27,8 +29,6 @@ import (
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 	"github.com/Dyuzhovsergey/shortener-url/internal/service"
 	"github.com/Dyuzhovsergey/shortener-url/migrations"
-
-	pb "github.com/Dyuzhovsergey/shortener-url/api"
 	"google.golang.org/grpc"
 )
 
@@ -41,18 +41,18 @@ var (
 func main() {
 	printBuildInfo()
 
-	// парсим конфигурацию
+	// ---- загрузка конфигурации ----
 	cfg, cfgErr := config.Load()
 	if cfgErr != nil {
 		fmt.Println("config error:", cfgErr)
 		return
 	}
 
-	// инициализируем zap logger
+	// ---- инициализация логгера ----
 	zapLogger := logger.Init()
 	defer zapLogger.Sync()
 
-	// ---------------- Аудит ----------------
+	// ---- инициализация аудита ----
 	auditor := audit.NewPublisher()
 
 	var fileObserver *audit.FileObserver
@@ -72,9 +72,12 @@ func main() {
 	}
 
 	if fileObserver != nil {
-		defer func() { _ = fileObserver.Close() }()
+		defer func() {
+			_ = fileObserver.Close()
+		}()
 	}
 
+	// ---- инициализация хранилища ----
 	var (
 		repo repository.Repository
 		db   *sql.DB
@@ -86,17 +89,19 @@ func main() {
 		if err != nil {
 			zapLogger.Fatal("failed to open DB", zap.Error(err))
 		}
+
 		if err := migrations.Run(context.Background(), db); err != nil {
 			zapLogger.Fatal("failed to run migrations", zap.Error(err))
 		}
+
 		repo = repository.NewPostgresRepository(db)
 		zapLogger.Info("using postgres repository", zap.String("dsn", cfg.DatabaseDSN))
-
 	} else if cfg.FileStoragePath != "" {
 		fileRepo, err := repository.NewFileRepository(cfg.FileStoragePath)
 		if err != nil {
 			zapLogger.Fatal("cannot init file repository", zap.Error(err))
 		}
+
 		repo = fileRepo
 		zapLogger.Info("using file repository", zap.String("path", cfg.FileStoragePath))
 	} else {
@@ -104,19 +109,19 @@ func main() {
 		zapLogger.Info("using in-memory repository")
 	}
 
-	// создаём сервис
+	// ---- инициализация сервиса ----
 	shorter := service.NewShorterService(repo, cfg)
 
-	// создаём HTTP-сервер
+	// ---- инициализация HTTP-сервера ----
 	server := handler.NewHTTPServer(cfg.BaseURL, cfg.TrustedSubnet, shorter, zapLogger, db, auditor)
 	router := server.Router()
 
-	// создаём http.Server
 	srv := &http.Server{
 		Addr:    cfg.RunAddr,
 		Handler: router,
 	}
 
+	// ---- инициализация gRPC-сервера ----
 	grpcHandler := handler.NewGRPCServer(cfg.BaseURL, shorter, zapLogger, auditor)
 
 	grpcSrv := grpc.NewServer(
@@ -124,7 +129,7 @@ func main() {
 	)
 	pb.RegisterShortenerServiceServer(grpcSrv, grpcHandler)
 
-	// ---- создаём общий listener для HTTP и gRPC ----
+	// ---- создание общего listener ----
 	var rootListener net.Listener
 
 	if cfg.EnableHTTPS {
@@ -159,48 +164,59 @@ func main() {
 	grpcListener := muxer.MatchWithWriters(
 		cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"),
 	)
-
 	httpListener := muxer.Match(cmux.Any())
 
-	serverErr := make(chan error, 3)
+	// ---- контекст завершения по сигналам ----
+	signalCtx, stop := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT,
+	)
+	defer stop()
 
-	// gRPC-сервер
-	go func() {
-		if err := grpcSrv.Serve(grpcListener); err != nil &&
+	// ---- запуск серверов через errgroup ----
+	group, groupCtx := errgroup.WithContext(signalCtx)
+
+	group.Go(func() error {
+		err := grpcSrv.Serve(grpcListener)
+		if err != nil &&
 			!errors.Is(err, cmux.ErrListenerClosed) &&
 			!errors.Is(err, net.ErrClosed) {
-			serverErr <- fmt.Errorf("grpc server failed: %w", err)
+			return fmt.Errorf("grpc server failed: %w", err)
 		}
-	}()
+		return nil
+	})
 
-	// HTTP-сервер
-	go func() {
-		if err := srv.Serve(httpListener); err != nil &&
+	group.Go(func() error {
+		err := srv.Serve(httpListener)
+		if err != nil &&
 			!errors.Is(err, http.ErrServerClosed) &&
 			!errors.Is(err, cmux.ErrListenerClosed) &&
 			!errors.Is(err, net.ErrClosed) {
-			serverErr <- fmt.Errorf("http server failed: %w", err)
+			return fmt.Errorf("http server failed: %w", err)
 		}
-	}()
+		return nil
+	})
 
-	// сам мультиплексор
-	go func() {
-		if err := muxer.Serve(); err != nil &&
+	group.Go(func() error {
+		err := muxer.Serve()
+		if err != nil &&
 			!errors.Is(err, cmux.ErrListenerClosed) &&
 			!errors.Is(err, net.ErrClosed) {
-			serverErr <- fmt.Errorf("cmux failed: %w", err)
+			return fmt.Errorf("cmux failed: %w", err)
 		}
-	}()
+		return nil
+	})
 
-	// ---- обработка сигналов / ошибок запуска ----
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	// ---- ожидание сигнала завершения или ошибки одной из goroutine ----
+	<-groupCtx.Done()
 
-	select {
-	case sig := <-quit:
-		zapLogger.Info("shutdown signal received", zap.String("signal", sig.String()))
-	case err := <-serverErr:
-		zapLogger.Fatal("server failed", zap.Error(err))
+	// ---- причины shutdown ----
+	if signalCtx.Err() != nil {
+		zapLogger.Info("shutdown signal received")
+	} else {
+		zapLogger.Error("shutdown started because one of the servers returned an error")
 	}
 
 	// ---- graceful shutdown ----
@@ -210,29 +226,47 @@ func main() {
 		zapLogger.Error("failed to close root listener", zap.Error(err))
 	}
 
-	// 2. мягко останавливаем gRPC
-	grpcStopped := make(chan struct{})
-	go func() {
-		grpcSrv.GracefulStop()
-		close(grpcStopped)
-	}()
+	// 2. параллельная остановка gRPC и HTTP
+	shutdownGroup, _ := errgroup.WithContext(context.Background())
 
-	select {
-	case <-grpcStopped:
-		zapLogger.Info("grpc server stopped gracefully")
-	case <-time.After(5 * time.Second):
-		zapLogger.Warn("grpc graceful stop timeout, forcing stop")
-		grpcSrv.Stop()
+	shutdownGroup.Go(func() error {
+		done := make(chan struct{})
+
+		go func() {
+			grpcSrv.GracefulStop()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			zapLogger.Info("grpc server stopped gracefully")
+			return nil
+		case <-time.After(5 * time.Second):
+			zapLogger.Warn("grpc graceful stop timeout, forcing stop")
+			grpcSrv.Stop()
+			return nil
+		}
+	})
+
+	shutdownGroup.Go(func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := srv.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("http server shutdown failed: %w", err)
+		}
+
+		zapLogger.Info("http server stopped gracefully")
+		return nil
+	})
+
+	if err := shutdownGroup.Wait(); err != nil {
+		zapLogger.Error("shutdown failed", zap.Error(err))
 	}
 
-	// 3. мягко останавливаем HTTP
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := srv.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		zapLogger.Error("http server shutdown failed", zap.Error(err))
-	} else {
-		zapLogger.Info("http server stopped gracefully")
+	// 3. дожидаемся завершения серверных goroutine
+	if err := group.Wait(); err != nil {
+		zapLogger.Fatal("server failed", zap.Error(err))
 	}
 
 	// ---- закрытие ресурсов ----
