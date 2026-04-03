@@ -84,7 +84,7 @@ func TestGRPCServer_ShortenExpandAndListUserURLs(t *testing.T) {
 	shortenResp, err := client.ShortenURL(
 		context.Background(),
 		pb.URLShortenRequest_builder{
-			Url: "https://example.com/test",
+			Url: proto.String("https://example.com/test"),
 		}.Build(),
 		grpc.Header(&header),
 	)
@@ -109,7 +109,7 @@ func TestGRPCServer_ShortenExpandAndListUserURLs(t *testing.T) {
 	expandResp, err := client.ExpandURL(
 		authCtx,
 		pb.URLExpandRequest_builder{
-			Id: shortID,
+			Id: proto.String(shortID),
 		}.Build(),
 	)
 	if err != nil {
@@ -146,9 +146,9 @@ func TestGRPCServer_ListUserURLs_IsSeparatedByAuthorization(t *testing.T) {
 	var header1 metadata.MD
 	resp1, err := client.ShortenURL(
 		context.Background(),
-		&pb.URLShortenRequest{
+		pb.URLShortenRequest_builder{
 			Url: proto.String("https://example.com/user1"),
-		},
+		}.Build(),
 		grpc.Header(&header1),
 	)
 	if err != nil {
@@ -166,9 +166,9 @@ func TestGRPCServer_ListUserURLs_IsSeparatedByAuthorization(t *testing.T) {
 	var header2 metadata.MD
 	resp2, err := client.ShortenURL(
 		context.Background(),
-		&pb.URLShortenRequest{
+		pb.URLShortenRequest_builder{
 			Url: proto.String("https://example.com/user2"),
-		},
+		}.Build(),
 		grpc.Header(&header2),
 	)
 	if err != nil {

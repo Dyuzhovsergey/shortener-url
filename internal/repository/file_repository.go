@@ -356,7 +356,8 @@ func (fr *FileRepository) appendRecordLocked(rec urlRecord) error {
 	return enc.Encode(rec)    // Encode сам добавит "\n"
 }
 
-func (fr *FileRepository) Stats(ctx context.Context) (Stats, error) {
+func (fr *FileRepository) Stats(_ context.Context) (Stats, error) {
+
 	fr.mu.RLock()
 	defer fr.mu.RUnlock()
 
