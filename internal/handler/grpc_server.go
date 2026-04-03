@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"net/url"
 	"strings"
 	"time"
 
@@ -53,20 +54,30 @@ func (s *GRPCServer) ShortenURL(ctx context.Context, req *pb.URLShortenRequest) 
 		if errors.Is(err, service.ErrAlreadyExists) && shortURL != "" {
 			s.publishAudit(ctx, "shorten", originalURL)
 
-			resp := &pb.URLShortenResponse{
+			resp := pb.URLShortenResponse_builder{
 				Result: proto.String(shortURL),
-			}
+			}.Build()
 			return resp, nil
 		}
 
-		return nil, status.Error(codes.InvalidArgument, "invalid URL format")
+		errText := strings.ToLower(err.Error())
+		if strings.Contains(errText, "invalid url") || strings.Contains(errText, "unsupported url scheme") {
+			return nil, status.Error(codes.InvalidArgument, "invalid URL format")
+		}
+
+		if s.logger != nil {
+			s.logger.Error("failed to create short url", zap.Error(err))
+		}
+
+		return nil, status.Error(codes.Internal, "internal error")
 	}
 
 	s.publishAudit(ctx, "shorten", originalURL)
 
-	resp := &pb.URLShortenResponse{
+	resp := pb.URLShortenResponse_builder{
 		Result: proto.String(shortURL),
-	}
+	}.Build()
+
 	return resp, nil
 }
 
@@ -86,6 +97,11 @@ func (s *GRPCServer) ExpandURL(ctx context.Context, req *pb.URLExpandRequest) (*
 		if errors.Is(err, repository.ErrDeleted) {
 			return nil, status.Error(codes.FailedPrecondition, "short url is deleted")
 		}
+
+		if s.logger != nil {
+			s.logger.Error("failed to expand short url", zap.Error(err), zap.String("short_id", shortID))
+		}
+
 		return nil, status.Error(codes.Internal, "internal error")
 	}
 
@@ -95,9 +111,9 @@ func (s *GRPCServer) ExpandURL(ctx context.Context, req *pb.URLExpandRequest) (*
 
 	s.publishAudit(ctx, "follow", originalURL)
 
-	resp := &pb.URLExpandResponse{
+	resp := pb.URLExpandResponse_builder{
 		Result: proto.String(originalURL),
-	}
+	}.Build()
 	return resp, nil
 }
 
@@ -105,22 +121,34 @@ func (s *GRPCServer) ExpandURL(ctx context.Context, req *pb.URLExpandRequest) (*
 func (s *GRPCServer) ListUserURLs(ctx context.Context, _ *pb.ListUserURLsRequest) (*pb.UserURLsResponse, error) {
 	userURLs, err := s.shorter.GetUserURLs(ctx)
 	if err != nil {
+		if s.logger != nil {
+			s.logger.Error("failed to list user urls", zap.Error(err))
+		}
 		return nil, status.Error(codes.Internal, "internal error")
 	}
 
 	items := make([]*pb.URLData, 0, len(userURLs))
 
 	for _, u := range userURLs {
-		item := &pb.URLData{
-			ShortUrl:    proto.String(s.baseURL + "/" + u.ShortID),
-			OriginalUrl: proto.String(u.OriginalURL),
+		shortURL, err := url.JoinPath(s.baseURL, u.ShortID)
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Error("failed to build short url", zap.Error(err), zap.String("short_id", u.ShortID))
+			}
+			return nil, status.Error(codes.Internal, "internal error")
 		}
+
+		item := pb.URLData_builder{
+			ShortUrl:    proto.String(shortURL),
+			OriginalUrl: proto.String(u.OriginalURL),
+		}.Build()
+
 		items = append(items, item)
 	}
 
-	resp := &pb.UserURLsResponse{
+	resp := pb.UserURLsResponse_builder{
 		Url: items,
-	}
+	}.Build()
 
 	return resp, nil
 }

@@ -83,9 +83,9 @@ func TestGRPCServer_ShortenExpandAndListUserURLs(t *testing.T) {
 
 	shortenResp, err := client.ShortenURL(
 		context.Background(),
-		&pb.URLShortenRequest{
-			Url: proto.String("https://example.com/test"),
-		},
+		pb.URLShortenRequest_builder{
+			Url: "https://example.com/test",
+		}.Build(),
 		grpc.Header(&header),
 	)
 	if err != nil {
@@ -108,9 +108,9 @@ func TestGRPCServer_ShortenExpandAndListUserURLs(t *testing.T) {
 
 	expandResp, err := client.ExpandURL(
 		authCtx,
-		&pb.URLExpandRequest{
-			Id: proto.String(shortID),
-		},
+		pb.URLExpandRequest_builder{
+			Id: shortID,
+		}.Build(),
 	)
 	if err != nil {
 		t.Fatalf("ExpandURL returned error: %v", err)
