@@ -357,8 +357,6 @@ func (fr *FileRepository) appendRecordLocked(rec urlRecord) error {
 }
 
 func (fr *FileRepository) Stats(ctx context.Context) (Stats, error) {
-	_ = ctx
-
 	fr.mu.RLock()
 	defer fr.mu.RUnlock()
 
