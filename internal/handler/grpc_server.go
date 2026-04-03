@@ -17,7 +17,6 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // GRPCServer реализует gRPC API сервиса сокращения URL.
@@ -146,7 +145,7 @@ func (s *GRPCServer) ExpandURL(ctx context.Context, req *pb.URLExpandRequest) (*
 }
 
 // ListUserURLs соответствует HTTP-эндпоинту GET /api/user/urls.
-func (s *GRPCServer) ListUserURLs(ctx context.Context, _ *emptypb.Empty) (*pb.UserURLsResponse, error) {
+func (s *GRPCServer) ListUserURLs(ctx context.Context, _ *pb.ListUserURLsRequest) (*pb.UserURLsResponse, error) {
 	userURLs, err := s.shorter.GetUserURLs(ctx)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "internal error")

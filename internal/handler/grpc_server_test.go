@@ -18,7 +18,6 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 const grpcBufSize = 1024 * 1024
@@ -120,7 +119,7 @@ func TestGRPCServer_ShortenExpandAndListUserURLs(t *testing.T) {
 		t.Fatalf("unexpected original url: got %q, want %q", got, "https://example.com/test")
 	}
 
-	listResp, err := client.ListUserURLs(authCtx, &emptypb.Empty{})
+	listResp, err := client.ListUserURLs(authCtx, &pb.ListUserURLsRequest{})
 	if err != nil {
 		t.Fatalf("ListUserURLs returned error: %v", err)
 	}
@@ -186,12 +185,12 @@ func TestGRPCServer_ListUserURLs_IsSeparatedByAuthorization(t *testing.T) {
 	ctxUser1 := metadata.AppendToOutgoingContext(context.Background(), "authorization", auth1[0])
 	ctxUser2 := metadata.AppendToOutgoingContext(context.Background(), "authorization", auth2[0])
 
-	list1, err := client.ListUserURLs(ctxUser1, &emptypb.Empty{})
+	list1, err := client.ListUserURLs(ctxUser1, &pb.ListUserURLsRequest{})
 	if err != nil {
 		t.Fatalf("ListUserURLs user1 returned error: %v", err)
 	}
 
-	list2, err := client.ListUserURLs(ctxUser2, &emptypb.Empty{})
+	list2, err := client.ListUserURLs(ctxUser2, &pb.ListUserURLsRequest{})
 	if err != nil {
 		t.Fatalf("ListUserURLs user2 returned error: %v", err)
 	}
