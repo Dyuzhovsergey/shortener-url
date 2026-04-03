@@ -1,4 +1,3 @@
-// Package handler for working HTTP server
 package handler
 
 import (
@@ -6,41 +5,58 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/Dyuzhovsergey/shortener-url/internal/audit"
 	"github.com/Dyuzhovsergey/shortener-url/internal/middleware"
 	"github.com/Dyuzhovsergey/shortener-url/internal/model"
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 	"github.com/Dyuzhovsergey/shortener-url/internal/service"
 )
 
+// DBPinger описывает минимальный интерфейс для проверки доступности базы данных.
 type DBPinger interface {
 	PingContext(ctx context.Context) error
 }
 
 // HTTPServer — слой HTTP, знает про сервис, но не про репозиторий.
 type HTTPServer struct {
-	baseURL string
-	shorter *service.ShorterService
-	logger  *zap.Logger
-	db      DBPinger
+	baseURL       string
+	trustedSubnet *net.IPNet
+	shorter       *service.ShorterService
+	logger        *zap.Logger
+	db            DBPinger
+	audit         *audit.Publisher
 }
 
-// NewHTTPServer — конструктор с внедрением зависимости (DI)
-func NewHTTPServer(baseURL string, shorter *service.ShorterService, logger *zap.Logger, db DBPinger) *HTTPServer {
+// NewHTTPServer — конструктор с внедрением зависимости (DI).
+func NewHTTPServer(baseURL string, trustedSubnet string, shorter *service.ShorterService, logger *zap.Logger, db DBPinger, auditor *audit.Publisher) *HTTPServer {
+	var subnet *net.IPNet
+	if strings.TrimSpace(trustedSubnet) != "" {
+		_, parsedSubnet, err := net.ParseCIDR(strings.TrimSpace(trustedSubnet))
+		if err == nil {
+			subnet = parsedSubnet
+		}
+	}
+
 	return &HTTPServer{
-		baseURL: baseURL,
-		shorter: shorter,
-		logger:  logger,
-		db:      db,
+		baseURL:       baseURL,
+		trustedSubnet: subnet,
+		shorter:       shorter,
+		logger:        logger,
+		db:            db,
+		audit:         auditor,
 	}
 }
 
-// Router — возвращает готовый http.Handler (ServeMux)
+// Router собирает роутер и возвращает готовый http.Handler.
 func (srv *HTTPServer) Router() http.Handler {
 	r := chi.NewRouter()
 
@@ -48,9 +64,15 @@ func (srv *HTTPServer) Router() http.Handler {
 	r.Use(middleware.GzipMiddleware)
 	r.Use(middleware.AuthMiddleware)
 
+	// pprof только в отладочных запусках.  PPROF=1 ./shortener
+	if os.Getenv("PPROF") == "1" {
+		mountPprof(r)
+	}
+
 	r.Post("/", srv.handlePost)
 	r.Post("/api/shorten", srv.handleAPIPost)
 	r.Get("/ping", srv.handlePing)
+	r.Get("/api/internal/stats", srv.handleStats)
 	r.Post("/api/shorten/batch", srv.handleAPIPostBatch)
 	r.Delete("/api/user/urls", srv.handleUserURLsDelete)
 	r.Get("/api/user/urls", srv.handleUserURLs)
@@ -81,8 +103,50 @@ func (srv *HTTPServer) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	srv.publishAudit(r.Context(), "follow", originalURL)
+
 	w.Header().Set("Location", originalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
+}
+
+func (srv *HTTPServer) isTrustedRequest(r *http.Request) bool {
+	if srv.trustedSubnet == nil {
+		return false
+	}
+
+	realIP := strings.TrimSpace(r.Header.Get("X-Real-IP"))
+	if realIP == "" {
+		return false
+	}
+
+	ip := net.ParseIP(realIP)
+	if ip == nil {
+		return false
+	}
+
+	return srv.trustedSubnet.Contains(ip)
+}
+
+// GET /api/internal/stats
+func (srv *HTTPServer) handleStats(w http.ResponseWriter, r *http.Request) {
+	if !srv.isTrustedRequest(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	stats, err := srv.shorter.GetStats(r.Context())
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := model.StatsResponse{URLs: stats.URLs, Users: stats.Users}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		srv.logger.Error("failed to write JSON stats response", zap.Error(err))
+		return
+	}
 }
 
 // POST /
@@ -99,18 +163,23 @@ func (srv *HTTPServer) handlePost(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	shortURL, err := srv.shorter.CreateShortURL(r.Context(), string(body), srv.baseURL)
+	originalURL := strings.TrimSpace(string(body))
+	shortURL, err := srv.shorter.CreateShortURL(r.Context(), originalURL, srv.baseURL)
 	if err != nil {
 		if shortURL != "" {
+			srv.publishAudit(r.Context(), "shorten", originalURL)
+
 			w.Header().Set("Content-Type", "text/plain")
-			w.WriteHeader(http.StatusConflict) // 409
-			_, _ = w.Write([]byte(shortURL))   // уже существующий короткий URL
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(shortURL))
 			return
 		}
 
 		http.Error(w, "Invalid URL format", http.StatusBadRequest)
 		return
 	}
+
+	srv.publishAudit(r.Context(), "shorten", originalURL)
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
@@ -127,14 +196,16 @@ func (srv *HTTPServer) handleAPIPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	originalURL := strings.TrimSpace(req.URL)
 	if req.URL == "" {
 		http.Error(w, "empty url field", http.StatusBadRequest)
 		return
 	}
 
-	shortURL, err := srv.shorter.CreateShortURL(r.Context(), req.URL, srv.baseURL)
+	shortURL, err := srv.shorter.CreateShortURL(r.Context(), originalURL, srv.baseURL)
 	if err != nil {
 		if shortURL != "" {
+			srv.publishAudit(r.Context(), "shorten", originalURL)
 			resp := model.ShortenResponse{Result: shortURL}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict) // 409
@@ -149,9 +220,10 @@ func (srv *HTTPServer) handleAPIPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	srv.publishAudit(r.Context(), "shorten", originalURL)
 	resp := model.ShortenResponse{Result: shortURL}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
+	w.WriteHeader(http.StatusCreated) // 201
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		srv.logger.Error("failed to write JSON response", zap.Error(err))
@@ -279,4 +351,26 @@ func (srv *HTTPServer) handleUserURLsDelete(w http.ResponseWriter, r *http.Reque
 	}
 
 	w.WriteHeader(http.StatusAccepted) // 202
+}
+
+// publishAudit рассылает событие аудита всем подключённым приёмникам.
+func (srv *HTTPServer) publishAudit(ctx context.Context, action, originalURL string) {
+	if srv.audit == nil {
+		return
+	}
+
+	userID, _ := middleware.UserIDFromContext(ctx)
+
+	ev := audit.Event{
+		TS:     time.Now().Unix(),
+		Action: action,
+		UserID: userID,
+		URL:    originalURL,
+	}
+
+	if err := srv.audit.Publish(ctx, ev); err != nil {
+		if srv.logger != nil {
+			srv.logger.Warn("audit publish failed", zap.Error(err))
+		}
+	}
 }

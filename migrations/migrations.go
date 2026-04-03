@@ -1,4 +1,3 @@
-// Package migrations for description migrat
 package migrations
 
 import (
@@ -6,6 +5,8 @@ import (
 	"database/sql"
 )
 
+// Run применяет idempotent-миграции схемы базы данных.
+// Функцию безопасно вызывать при каждом старте сервиса.
 func Run(ctx context.Context, db *sql.DB) error {
 	const createTable = `
 		CREATE TABLE IF NOT EXISTS short_urls (

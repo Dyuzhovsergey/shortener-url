@@ -27,6 +27,7 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
+// Save сохраняет ссылку в памяти.
 func (repo *MemoryRepository) Save(ctx context.Context, shortID, originalURL, userID string) error {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
@@ -125,4 +126,20 @@ func (repo *MemoryRepository) DeleteUserURLs(ctx context.Context, userID string,
 		repo.data[id] = rec
 	}
 	return nil
+}
+
+func (repo *MemoryRepository) Stats(ctx context.Context) (Stats, error) {
+	_ = ctx
+
+	repo.mu.RLock()
+	defer repo.mu.RUnlock()
+
+	stats := Stats{URLs: len(repo.data)}
+	for _, set := range repo.userIndex {
+		if len(set) > 0 {
+			stats.Users++
+		}
+	}
+
+	return stats, nil
 }

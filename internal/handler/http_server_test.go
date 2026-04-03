@@ -7,12 +7,15 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/Dyuzhovsergey/shortener-url/internal/audit"
 	"github.com/Dyuzhovsergey/shortener-url/internal/config"
 	"github.com/Dyuzhovsergey/shortener-url/internal/model"
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
@@ -26,14 +29,15 @@ func (f *fakeDB) PingContext(ctx context.Context) error { return f.err }
 // makeTestConfig — возвращает тестовую конфигурацию.
 func makeTestConfig() *config.ShortenerConfig {
 	return &config.ShortenerConfig{
-		CharSet:  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-		LengthID: 8,
-		BaseURL:  "http://localhost:8080",
-		RunAddr:  ":8080",
+		CharSet:       "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+		LengthID:      8,
+		BaseURL:       "http://localhost:8080",
+		RunAddr:       ":8080",
+		TrustedSubnet: "",
 	}
 }
 
-func setupTestServer() *HTTPServer {
+func setupTestServer(auditor *audit.Publisher) *HTTPServer {
 	repo := repository.NewMemoryRepository()
 	cfg := makeTestConfig()
 	svc := service.NewShorterService(repo, cfg)
@@ -41,7 +45,7 @@ func setupTestServer() *HTTPServer {
 	logger := zap.NewNop()
 	db := &fakeDB{err: nil}
 
-	return NewHTTPServer(cfg.BaseURL, svc, logger, db)
+	return NewHTTPServer(cfg.BaseURL, cfg.TrustedSubnet, svc, logger, db, auditor)
 }
 
 func requireNoErr(t *testing.T, err error) {
@@ -72,7 +76,7 @@ func getAuthCookieFromResponse(t *testing.T, res *http.Response) *http.Cookie {
 
 // --- POST / — создание короткого URL ---
 func TestHandlePost(t *testing.T) {
-	srv := setupTestServer()
+	srv := setupTestServer(nil)
 
 	reqBody := "https://practicum.yandex.ru/"
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(reqBody))
@@ -100,7 +104,7 @@ func TestHandlePost(t *testing.T) {
 
 // --- GET /{id} — редирект ---
 func TestHandleGet_Redirect(t *testing.T) {
-	srv := setupTestServer()
+	srv := setupTestServer(nil)
 
 	// 1) создаём ссылку
 	orig := "https://example.com"
@@ -138,7 +142,7 @@ func TestHandleGet_Redirect(t *testing.T) {
 }
 
 func TestHandleAPIPost_OK(t *testing.T) {
-	srv := setupTestServer()
+	srv := setupTestServer(nil)
 
 	body := `{"url":"https://practicum.yandex.ru/"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
@@ -176,7 +180,9 @@ func TestHandlePing_OK(t *testing.T) {
 
 	logger := zap.NewNop()
 	db := &fakeDB{err: nil}
-	srv := NewHTTPServer(cfg.BaseURL, svc, logger, db)
+	auditor := audit.NewPublisher()
+
+	srv := NewHTTPServer(cfg.BaseURL, cfg.TrustedSubnet, svc, logger, db, auditor)
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	rec := httptest.NewRecorder()
@@ -194,7 +200,9 @@ func TestHandlePing_DBError(t *testing.T) {
 
 	logger := zap.NewNop()
 	db := &fakeDB{err: errors.New("db down")}
-	srv := NewHTTPServer(cfg.BaseURL, svc, logger, db)
+	auditor := audit.NewPublisher()
+
+	srv := NewHTTPServer(cfg.BaseURL, cfg.TrustedSubnet, svc, logger, db, auditor)
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	rec := httptest.NewRecorder()
@@ -206,7 +214,7 @@ func TestHandlePing_DBError(t *testing.T) {
 }
 
 func TestHandleAPIPostBatch_OK(t *testing.T) {
-	srv := setupTestServer()
+	srv := setupTestServer(nil)
 
 	body := `[
 		{"correlation_id":"1","original_url":"https://practicum.yandex.ru/"},
@@ -250,7 +258,7 @@ func TestHandleAPIPostBatch_OK(t *testing.T) {
 // 2) DELETE с этой cookie -> 202
 // 3) ждём чуть-чуть (т.к. async) и GET -> 410
 func TestHandleDeleteUserURLs_AcceptsAndEventuallyGone(t *testing.T) {
-	srv := setupTestServer()
+	srv := setupTestServer(nil)
 
 	// 1) создаём ссылку
 	orig := "https://example.com/to-delete"
@@ -320,5 +328,235 @@ func TestHandleDeleteUserURLs_AcceptsAndEventuallyGone(t *testing.T) {
 		}
 
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestHandleStats_ForbiddenWhenSubnetEmpty(t *testing.T) {
+	srv := setupTestServer(nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/internal/stats", nil)
+	req.Header.Set("X-Real-IP", "192.168.1.10")
+
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rec.Code)
+	}
+}
+
+func TestHandleStats_ForbiddenWhenIPOutsideTrustedSubnet(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	cfg := makeTestConfig()
+	cfg.TrustedSubnet = "192.168.1.0/24"
+	svc := service.NewShorterService(repo, cfg)
+
+	logger := zap.NewNop()
+	db := &fakeDB{err: nil}
+	auditor := audit.NewPublisher()
+
+	srv := NewHTTPServer(cfg.BaseURL, cfg.TrustedSubnet, svc, logger, db, auditor)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/internal/stats", nil)
+	req.Header.Set("X-Real-IP", "10.0.0.1")
+
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rec.Code)
+	}
+}
+
+func TestHandleStats_OK(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	cfg := makeTestConfig()
+	cfg.TrustedSubnet = "192.168.1.0/24"
+	svc := service.NewShorterService(repo, cfg)
+
+	logger := zap.NewNop()
+	db := &fakeDB{err: nil}
+	auditor := audit.NewPublisher()
+
+	srv := NewHTTPServer(cfg.BaseURL, cfg.TrustedSubnet, svc, logger, db, auditor)
+	router := srv.Router()
+
+	for _, originalURL := range []string{
+		"https://example.com/1",
+		"https://example.com/2",
+		"https://example.com/3",
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(originalURL))
+		req.Header.Set("Content-Type", "text/plain")
+
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusCreated {
+			b, _ := io.ReadAll(rec.Result().Body)
+			t.Fatalf("expected 201, got %d, body=%q", rec.Code, string(b))
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/internal/stats", nil)
+	req.Header.Set("X-Real-IP", "192.168.1.15")
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		b, _ := io.ReadAll(rec.Result().Body)
+		t.Fatalf("expected 200, got %d, body=%q", rec.Code, string(b))
+	}
+
+	var resp model.StatsResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if resp.URLs != 3 {
+		t.Fatalf("expected urls=3, got %d", resp.URLs)
+	}
+	if resp.Users != 3 {
+		t.Fatalf("expected users=3, got %d", resp.Users)
+	}
+}
+
+type testAuditObserver struct {
+	mu     sync.Mutex
+	events []audit.Event
+}
+
+func (o *testAuditObserver) Observe(_ context.Context, event audit.Event) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.events = append(o.events, event)
+	return nil
+}
+
+func (o *testAuditObserver) Last() (audit.Event, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if len(o.events) == 0 {
+		return audit.Event{}, false
+	}
+	return o.events[len(o.events)-1], true
+}
+
+func TestAudit_POSTRoot_Shorten(t *testing.T) {
+	srv := setupTestServer(nil)
+	router := srv.Router()
+
+	obs := &testAuditObserver{}
+	auditor := audit.NewPublisher()
+	auditor.Add(obs)
+	// ВАЖНО: сервер в тесте должен быть создан с этим auditor.
+	// Если в setupTestServer auditor создаётся внутри — поменяй setupTestServer так,
+	// чтобы он принимал auditor параметром или чтобы srv.audit = auditor.
+	srv.audit = auditor
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://example.com/path"))
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected %d, got %d", http.StatusCreated, w.Code)
+	}
+
+	ev, ok := obs.Last()
+	if !ok {
+		t.Fatalf("expected audit event")
+	}
+	if ev.Action != "shorten" {
+		t.Fatalf("expected action shorten, got %q", ev.Action)
+	}
+	if ev.URL != "https://example.com/path" {
+		t.Fatalf("expected url %q, got %q", "https://example.com/path", ev.URL)
+	}
+	if ev.TS <= 0 {
+		t.Fatalf("expected ts > 0, got %d", ev.TS)
+	}
+	if ev.UserID == "" {
+		t.Fatalf("expected non-empty user_id")
+	}
+}
+
+func TestAudit_POSTAPIShorten_Shorten(t *testing.T) {
+	srv := setupTestServer(nil)
+	router := srv.Router()
+
+	obs := &testAuditObserver{}
+	auditor := audit.NewPublisher()
+	auditor.Add(obs)
+	srv.audit = auditor
+
+	body := `{"url":"https://example.com/api"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected %d, got %d", http.StatusCreated, w.Code)
+	}
+
+	ev, ok := obs.Last()
+	if !ok {
+		t.Fatalf("expected audit event")
+	}
+	if ev.Action != "shorten" {
+		t.Fatalf("expected action shorten, got %q", ev.Action)
+	}
+	if ev.URL != "https://example.com/api" {
+		t.Fatalf("expected url %q, got %q", "https://example.com/api", ev.URL)
+	}
+	if ev.UserID == "" {
+		t.Fatalf("expected non-empty user_id")
+	}
+}
+
+func TestAudit_GETFollow_Follow(t *testing.T) {
+	obs := &testAuditObserver{}
+	auditor := audit.NewPublisher()
+	auditor.Add(obs)
+
+	srv := setupTestServer(auditor)
+	router := srv.Router()
+
+	original := "https://example.com/follow"
+	shortURL, err := srv.shorter.CreateShortURL(context.Background(), original, srv.baseURL)
+	if err != nil {
+		t.Fatalf("CreateShortURL: %v", err)
+	}
+
+	u, err := url.Parse(shortURL)
+	if err != nil {
+		t.Fatalf("parse short url: %v", err)
+	}
+	id := strings.TrimPrefix(u.Path, "/")
+
+	req := httptest.NewRequest(http.MethodGet, "/"+id, nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("expected %d, got %d", http.StatusTemporaryRedirect, w.Code)
+	}
+
+	ev, ok := obs.Last()
+	if !ok {
+		t.Fatalf("expected audit event")
+	}
+	if ev.Action != "follow" {
+		t.Fatalf("expected action follow, got %q", ev.Action)
+	}
+	if ev.URL != original {
+		t.Fatalf("expected url %q, got %q", original, ev.URL)
+	}
+	if ev.UserID == "" {
+		t.Fatalf("expected non-empty user_id")
 	}
 }

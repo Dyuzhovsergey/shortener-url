@@ -1,4 +1,3 @@
-// Package service for business logic project
 package service
 
 import (
@@ -18,7 +17,9 @@ import (
 const maxAttempts = 10
 
 var (
-	ErrAlreadyExists   = errors.New("URL already exists")
+	// ErrAlreadyExists возвращается при попытке сократить URL, который уже есть в хранилище.
+	ErrAlreadyExists = errors.New("URL already exists")
+	// ErrDeleteQueueFull возвращается, если очередь на асинхронное удаление переполнена.
 	ErrDeleteQueueFull = errors.New("delete queue is full")
 )
 
@@ -35,15 +36,22 @@ type ShorterService struct {
 	mu   sync.Mutex
 
 	deleteCh chan deleteTask
+
+	idPool sync.Pool
 }
 
-// NewShorterService - Конструктор с внедрением зависимости (DI)
+// NewShorterService создаёт сервис сокращения URL и запускает фонового воркера для удаления.
 func NewShorterService(repo repository.Repository, cfg *config.ShortenerConfig) *ShorterService {
 	svc := &ShorterService{
 		repo:     repo,
 		cfg:      cfg,
 		rnd:      rand.New(rand.NewSource(time.Now().UnixNano())),
 		deleteCh: make(chan deleteTask, 1024),
+	}
+	// Пул буферов под генерацию shortID.
+	svc.idPool.New = func() any {
+		b := make([]byte, svc.cfg.LengthID)
+		return &b
 	}
 
 	go svc.deleteWorker() // асинхронный воркер
@@ -52,14 +60,14 @@ func NewShorterService(repo repository.Repository, cfg *config.ShortenerConfig) 
 
 // BatchItem — один элемент батч-запроса для сервиса.
 type BatchItem struct {
-	CorrelationID string
-	OriginalURL   string
+	CorrelationID string `json:"correlation_id"`
+	OriginalURL   string `json:"original_url"`
 }
 
 // BatchResult — результат обработки одного элемента батча.
 type BatchResult struct {
-	CorrelationID string
-	ShortURL      string
+	CorrelationID string `json:"correlation_id"`
+	ShortURL      string `json:"short_url"`
 }
 
 // CreateShortURL — создаёт короткую ссылку и сохраняет её.
@@ -81,8 +89,10 @@ func (svc *ShorterService) CreateShortURL(ctx context.Context, originalURL strin
 	baseURL = strings.TrimRight(baseURL, "/")
 
 	var shortID string
+	unique := false
 
 	for i := 0; i < maxAttempts; i++ {
+
 		shortID = svc.generateID()
 
 		_, ok, err := svc.repo.Get(ctx, shortID)
@@ -90,15 +100,12 @@ func (svc *ShorterService) CreateShortURL(ctx context.Context, originalURL strin
 			return "", err
 		}
 		if !ok {
+			unique = true
 			break
 		}
 	}
 
-	_, ok, err := svc.repo.Get(ctx, shortID)
-	if err != nil {
-		return "", err
-	}
-	if ok {
+	if !unique {
 		return "", errors.New("failed to generate unique shortID")
 	}
 
@@ -126,17 +133,28 @@ func (svc *ShorterService) GetOriginalURL(ctx context.Context, shortID string) (
 
 // generateID — генерирует случайный shortID.
 func (svc *ShorterService) generateID() string {
-	svc.mu.Lock()
-	defer svc.mu.Unlock()
+	bufp := svc.idPool.Get().(*[]byte)
+	buf := *bufp
 
-	id := make([]byte, svc.cfg.LengthID)
-	for i := range id {
-		id[i] = svc.cfg.CharSet[svc.rnd.Intn(len(svc.cfg.CharSet))]
+	if cap(buf) < svc.cfg.LengthID {
+		buf = make([]byte, svc.cfg.LengthID)
 	}
-	return string(id)
+	buf = buf[:svc.cfg.LengthID]
+
+	svc.mu.Lock()
+	for i := 0; i < svc.cfg.LengthID; i++ {
+		buf[i] = svc.cfg.CharSet[svc.rnd.Intn(len(svc.cfg.CharSet))]
+	}
+	svc.mu.Unlock()
+	id := string(buf)
+
+	*bufp = buf
+	svc.idPool.Put(bufp)
+
+	return id
 }
 
-// GetUserURLs для получения ссылок пользователя
+// GetUserURLs возвращает список ссылок текущего пользователя (из контекста запроса).
 func (svc *ShorterService) GetUserURLs(ctx context.Context) ([]repository.UserURL, error) {
 	userID, ok := middleware.UserIDFromContext(ctx)
 	if !ok || userID == "" {
@@ -145,29 +163,45 @@ func (svc *ShorterService) GetUserURLs(ctx context.Context) ([]repository.UserUR
 	return svc.repo.GetUserURLs(ctx, userID)
 }
 
-// CreateShortURLBatch — обрабатывает батч URL'ов.
-func (svc *ShorterService) CreateShortURLBatch(ctx context.Context, baseURL string, items []BatchItem) ([]BatchResult, error) {
+// GetStats возвращает агрегированную статистику сервиса.
+func (svc *ShorterService) GetStats(ctx context.Context) (repository.Stats, error) {
+	return svc.repo.Stats(ctx)
+}
+
+// CreateShortURLBatch создаёт короткие ссылки для батч-запроса.
+// При ошибке валидации любого URL возвращает ошибку.
+// CreateShortURLBatch создаёт короткие ссылки для батч-запроса.
+// Возвращает результат в том же порядке, что и входные элементы.
+func (svc *ShorterService) CreateShortURLBatch(
+	ctx context.Context,
+	baseURL string,
+	items []BatchItem,
+) ([]BatchResult, error) {
 	if len(items) == 0 {
-		return nil, errors.New("empty batch")
+		return nil, nil
 	}
 
-	results := make([]BatchResult, 0, len(items))
+	res := make([]BatchResult, 0, len(items))
 
 	for _, it := range items {
-		shortURL, err := svc.CreateShortURL(ctx, it.OriginalURL, baseURL)
-		if err != nil {
+		original := strings.TrimSpace(it.OriginalURL)
+
+		shortURL, err := svc.CreateShortURL(ctx, original, baseURL)
+		// Если shortURL пустой — это настоящая ошибка (например, invalid URL format).
+		if err != nil && shortURL == "" {
 			return nil, err
 		}
 
-		results = append(results, BatchResult{
+		res = append(res, BatchResult{
 			CorrelationID: it.CorrelationID,
 			ShortURL:      shortURL,
 		})
 	}
 
-	return results, nil
+	return res, nil
 }
 
+// DeleteUserURLsAsync ставит удаление ссылок пользователя в очередь и возвращает сразу (202 на HTTP-уровне)
 func (svc *ShorterService) DeleteUserURLsAsync(ctx context.Context, shortIDs []string) error {
 	userID, ok := middleware.UserIDFromContext(ctx)
 	if !ok || userID == "" {

@@ -1,11 +1,14 @@
 package repository
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -26,18 +29,20 @@ type FileRepository struct {
 	userIndex map[string]map[string]string // userID -> (shortID -> originalURL)
 	deleted   map[string]bool              // shortID -> is_deleted
 
-	records  []urlRecord
-	filePath string
+	filePath     string
+	nextRecordID int
 }
 
+// NewFileRepository создаёт файловое хранилище по указанному пути и восстанавливает индексы из файла,
+// если файл уже существует.
 func NewFileRepository(path string) (*FileRepository, error) {
 	fr := &FileRepository{
-		data:      make(map[string]string),
-		reverse:   make(map[string]string),
-		userIndex: make(map[string]map[string]string),
-		deleted:   make(map[string]bool),
-		records:   make([]urlRecord, 0),
-		filePath:  path,
+		data:         make(map[string]string),
+		reverse:      make(map[string]string),
+		userIndex:    make(map[string]map[string]string),
+		deleted:      make(map[string]bool),
+		filePath:     path,
+		nextRecordID: 1,
 	}
 
 	f, err := os.Open(path)
@@ -57,32 +62,147 @@ func NewFileRepository(path string) (*FileRepository, error) {
 		return fr, nil
 	}
 
-	var records []urlRecord
-	dec := json.NewDecoder(f)
-	if err := dec.Decode(&records); err != nil {
+	format, err := detectFileFormat(f)
+	if err != nil {
 		return nil, err
 	}
 
-	// восстанавливаем индексы из файла
-	for _, rec := range records {
-		fr.records = append(fr.records, rec)
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
 
-		fr.data[rec.ShortID] = rec.OriginalURL
-		fr.reverse[rec.OriginalURL] = rec.ShortID
-
-		fr.deleted[rec.ShortID] = rec.IsDeleted
-
-		if rec.UserID != "" {
-			m, ok := fr.userIndex[rec.UserID]
-			if !ok {
-				m = make(map[string]string)
-				fr.userIndex[rec.UserID] = m
-			}
-			m[rec.ShortID] = rec.OriginalURL
+	switch format {
+	case "array":
+		// JSON-массив. Считаем, восстановим индексы и
+		// сразу конвертируем в NDJSON, чтобы не было перезаписей.
+		var records []urlRecord
+		dec := json.NewDecoder(f)
+		if err := dec.Decode(&records); err != nil {
+			return nil, err
 		}
+
+		for _, rec := range records {
+			fr.applyRecordLocked(rec)
+		}
+
+		// Конвертируем файл в NDJSON.
+		if err := rewriteAsNDJSON(path, records); err != nil {
+			return nil, err
+		}
+
+	case "ndjson":
+		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+
+			var rec urlRecord
+			if err := json.Unmarshal([]byte(line), &rec); err != nil {
+				return nil, err
+			}
+			fr.applyRecordLocked(rec)
+		}
+		if err := scanner.Err(); err != nil {
+			return nil, err
+		}
+
+	default:
+		return nil, errors.New("unknown file format")
 	}
 
 	return fr, nil
+}
+
+// detectFileFormat определяет формат файла:
+// - array  -> начинается с '[' (после пропуска пробелов)
+// - ndjson -> иначе
+func detectFileFormat(f *os.File) (string, error) {
+	buf := make([]byte, 1)
+	for {
+		n, err := f.Read(buf)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return "ndjson", nil
+			}
+			return "", err
+		}
+		if n == 0 {
+			continue
+		}
+		b := buf[0]
+		switch b {
+		case ' ', '\n', '\r', '\t':
+			continue
+		case '[':
+			return "array", nil
+		default:
+			return "ndjson", nil
+		}
+	}
+}
+
+// rewriteAsNDJSON перезаписывает файл в формате NDJSON (одна запись на строку).
+// Используется только при обнаружении старого формата (JSON-массив).
+func rewriteAsNDJSON(path string, records []urlRecord) error {
+	tmp := path + ".tmp"
+
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+
+	enc := json.NewEncoder(f) // без SetIndent — это важно для аллокаций
+	for _, rec := range records {
+		if err := enc.Encode(rec); err != nil {
+			_ = f.Close()
+			return err
+		}
+	}
+
+	if err := f.Close(); err != nil {
+		return err
+	}
+
+	return os.Rename(tmp, path)
+}
+
+// applyRecordLocked применяет запись к индексам репозитория.
+// Вызывать в одном потоке при инициализации (или под lock).
+func (fr *FileRepository) applyRecordLocked(rec urlRecord) {
+	if rec.ShortID == "" {
+		return
+	}
+
+	// Восстанавливаем record_id, чтобы следующий ID был уникальным.
+	if rec.RecordID != "" {
+		if id, err := strconv.Atoi(rec.RecordID); err == nil {
+			if id >= fr.nextRecordID {
+				fr.nextRecordID = id + 1
+			}
+		}
+	}
+
+	// data/reverse восстанавливаем, для Get.
+	if rec.OriginalURL != "" {
+		fr.data[rec.ShortID] = rec.OriginalURL
+		fr.reverse[rec.OriginalURL] = rec.ShortID
+	}
+
+	// userIndex для /api/user/urls и проверки ownership при delete
+	if rec.UserID != "" && rec.OriginalURL != "" {
+		m, ok := fr.userIndex[rec.UserID]
+		if !ok {
+			m = make(map[string]string)
+			fr.userIndex[rec.UserID] = m
+		}
+		m[rec.ShortID] = rec.OriginalURL
+	}
+
+	fr.deleted[rec.ShortID] = rec.IsDeleted
 }
 
 // Save сохраняет originalURL по shortID и userID.
@@ -116,17 +236,17 @@ func (fr *FileRepository) Save(ctx context.Context, shortID, originalURL, userID
 		m[shortID] = originalURL
 	}
 
-	// 4) добавляем запись в records
-	recordID := strconv.Itoa(len(fr.records) + 1)
-	fr.records = append(fr.records, urlRecord{
-		RecordID:    recordID,
+	// 4) append-only запись в файл (NDJSON)
+	rec := urlRecord{
+		RecordID:    strconv.Itoa(fr.nextRecordID),
 		ShortID:     shortID,
 		OriginalURL: originalURL,
 		UserID:      userID,
 		IsDeleted:   false,
-	})
+	}
+	fr.nextRecordID++
 
-	return fr.rewriteFileLocked()
+	return fr.appendRecordLocked(rec)
 }
 
 // Get возвращает originalURL по shortID.
@@ -191,34 +311,62 @@ func (fr *FileRepository) DeleteUserURLs(ctx context.Context, userID string, sho
 		return nil
 	}
 
-	// 1) помечаем deleted в map
 	for _, id := range shortIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
 		if _, ok := owned[id]; !ok {
 			continue
 		}
-		fr.deleted[id] = true
-	}
-
-	// 2) синхронизируем records
-	for i := range fr.records {
-		id := fr.records[i].ShortID
 		if fr.deleted[id] {
-			fr.records[i].IsDeleted = true
+			continue
+		}
+
+		originalURL := fr.data[id]
+		fr.deleted[id] = true
+
+		rec := urlRecord{
+			RecordID:    strconv.Itoa(fr.nextRecordID),
+			ShortID:     id,
+			OriginalURL: originalURL,
+			UserID:      userID,
+			IsDeleted:   true,
+		}
+		fr.nextRecordID++
+
+		if err := fr.appendRecordLocked(rec); err != nil {
+			return err
 		}
 	}
 
-	return fr.rewriteFileLocked()
+	return nil
 }
 
-// rewriteFileLocked перезаписывает файл текущими fr.records.
-func (fr *FileRepository) rewriteFileLocked() error {
-	f, err := os.OpenFile(fr.filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+// appendRecordLocked добавляет одну запись в конец файла (NDJSON).
+// Вызывать только под fr.mu.Lock().
+func (fr *FileRepository) appendRecordLocked(rec urlRecord) error {
+	f, err := os.OpenFile(fr.filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	enc := json.NewEncoder(f)
-	enc.SetIndent("", "  ")
-	return enc.Encode(fr.records)
+	enc := json.NewEncoder(f) // без SetIndent
+	return enc.Encode(rec)    // Encode сам добавит "\n"
+}
+
+func (fr *FileRepository) Stats(ctx context.Context) (Stats, error) {
+	_ = ctx
+
+	fr.mu.RLock()
+	defer fr.mu.RUnlock()
+
+	stats := Stats{URLs: len(fr.data)}
+	for _, m := range fr.userIndex {
+		if len(m) > 0 {
+			stats.Users++
+		}
+	}
+	return stats, nil
 }

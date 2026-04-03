@@ -18,7 +18,7 @@ var userSecretKey = []byte("super-secret-user-key")
 // ключ для context.Context
 type userIDKey struct{}
 
-// UserIDFromContext достаёт userID из контекста.
+// UserIDFromContext возвращает userID из context.Context, если он был установлен AuthMiddleware.
 func UserIDFromContext(ctx context.Context) (string, bool) {
 	id, ok := ctx.Value(userIDKey{}).(string)
 	if !ok || id == "" {
@@ -67,7 +67,7 @@ func parseAndVerifyCookie(val string) (string, bool) {
 	return userID, true
 }
 
-// AuthMiddleware - выдаёт/проверяет подписанную куку и кладёт userID в контекст.
+// AuthMiddleware - выдаёт/проверяет подписанную cookie и кладёт userID в контекст запроса.
 func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var userID string
