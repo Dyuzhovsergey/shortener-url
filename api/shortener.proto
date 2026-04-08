@@ -1,0 +1,44 @@
+edition = "2023";
+
+package shortener;
+
+import "google/protobuf/go_features.proto";
+
+option go_package = "github.com/Dyuzhovsergey/shortener-url/api";
+option features.(pb.go).api_level = API_OPAQUE;
+
+
+service ShortenerService {
+  rpc ShortenURL (URLShortenRequest) returns (URLShortenResponse);
+  rpc ExpandURL (URLExpandRequest) returns (URLExpandResponse);
+  rpc ListUserURLs (ListUserURLsRequest) returns (UserURLsResponse);
+}
+
+message URLShortenRequest {
+  string url = 1;
+}
+
+message URLShortenResponse {
+  string result = 1;
+}
+
+message URLExpandRequest {
+  string id = 1;
+}
+
+message URLExpandResponse {
+  string result = 1;
+}
+
+
+
+message UserURLsResponse {
+  repeated URLData url = 1;
+}
+
+message ListUserURLsRequest {}
+
+message URLData {
+  string short_url = 1;
+  string original_url = 2;
+}

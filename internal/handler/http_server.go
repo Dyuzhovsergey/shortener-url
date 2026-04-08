@@ -72,7 +72,8 @@ func (srv *HTTPServer) Router() http.Handler {
 	r.Post("/", srv.handlePost)
 	r.Post("/api/shorten", srv.handleAPIPost)
 	r.Get("/ping", srv.handlePing)
-	r.Get("/api/internal/stats", srv.handleStats)
+	r.With(middleware.TrustedSubnetMiddleware(srv.trustedSubnet)).
+		Get("/api/internal/stats", srv.handleStats)
 	r.Post("/api/shorten/batch", srv.handleAPIPostBatch)
 	r.Delete("/api/user/urls", srv.handleUserURLsDelete)
 	r.Get("/api/user/urls", srv.handleUserURLs)
@@ -109,31 +110,8 @@ func (srv *HTTPServer) handleGet(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusTemporaryRedirect)
 }
 
-func (srv *HTTPServer) isTrustedRequest(r *http.Request) bool {
-	if srv.trustedSubnet == nil {
-		return false
-	}
-
-	realIP := strings.TrimSpace(r.Header.Get("X-Real-IP"))
-	if realIP == "" {
-		return false
-	}
-
-	ip := net.ParseIP(realIP)
-	if ip == nil {
-		return false
-	}
-
-	return srv.trustedSubnet.Contains(ip)
-}
-
 // GET /api/internal/stats
 func (srv *HTTPServer) handleStats(w http.ResponseWriter, r *http.Request) {
-	if !srv.isTrustedRequest(r) {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
-
 	stats, err := srv.shorter.GetStats(r.Context())
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)

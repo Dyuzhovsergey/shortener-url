@@ -7,24 +7,30 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
-	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/soheilhy/cmux"
 	"go.uber.org/zap"
 
+	pb "github.com/Dyuzhovsergey/shortener-url/api"
 	"github.com/Dyuzhovsergey/shortener-url/internal/audit"
 	"github.com/Dyuzhovsergey/shortener-url/internal/certutil"
 	"github.com/Dyuzhovsergey/shortener-url/internal/config"
 	"github.com/Dyuzhovsergey/shortener-url/internal/handler"
 	"github.com/Dyuzhovsergey/shortener-url/internal/logger"
+	"github.com/Dyuzhovsergey/shortener-url/internal/middleware"
 	"github.com/Dyuzhovsergey/shortener-url/internal/repository"
 	"github.com/Dyuzhovsergey/shortener-url/internal/service"
 	"github.com/Dyuzhovsergey/shortener-url/migrations"
+	"google.golang.org/grpc"
 )
 
 var (
@@ -36,18 +42,18 @@ var (
 func main() {
 	printBuildInfo()
 
-	// парсим конфигурацию
+	// ---- загрузка конфигурации ----
 	cfg, cfgErr := config.Load()
 	if cfgErr != nil {
 		fmt.Println("config error:", cfgErr)
 		return
 	}
 
-	// инициализируем zap logger
+	// ---- инициализация логгера ----
 	zapLogger := logger.Init()
 	defer zapLogger.Sync()
 
-	// ---------------- Аудит ----------------
+	// ---- инициализация аудита ----
 	auditor := audit.NewPublisher()
 
 	var fileObserver *audit.FileObserver
@@ -67,9 +73,12 @@ func main() {
 	}
 
 	if fileObserver != nil {
-		defer func() { _ = fileObserver.Close() }()
+		defer func() {
+			_ = fileObserver.Close()
+		}()
 	}
 
+	// ---- инициализация хранилища ----
 	var (
 		repo repository.Repository
 		db   *sql.DB
@@ -81,17 +90,19 @@ func main() {
 		if err != nil {
 			zapLogger.Fatal("failed to open DB", zap.Error(err))
 		}
+
 		if err := migrations.Run(context.Background(), db); err != nil {
 			zapLogger.Fatal("failed to run migrations", zap.Error(err))
 		}
+
 		repo = repository.NewPostgresRepository(db)
 		zapLogger.Info("using postgres repository", zap.String("dsn", cfg.DatabaseDSN))
-
 	} else if cfg.FileStoragePath != "" {
 		fileRepo, err := repository.NewFileRepository(cfg.FileStoragePath)
 		if err != nil {
 			zapLogger.Fatal("cannot init file repository", zap.Error(err))
 		}
+
 		repo = fileRepo
 		zapLogger.Info("using file repository", zap.String("path", cfg.FileStoragePath))
 	} else {
@@ -99,67 +110,164 @@ func main() {
 		zapLogger.Info("using in-memory repository")
 	}
 
-	// создаём сервис
+	// ---- инициализация сервиса ----
 	shorter := service.NewShorterService(repo, cfg)
 
-	// создаём HTTP-сервер
+	// ---- инициализация HTTP-сервера ----
 	server := handler.NewHTTPServer(cfg.BaseURL, cfg.TrustedSubnet, shorter, zapLogger, db, auditor)
 	router := server.Router()
 
-	// создаём http.Server
 	srv := &http.Server{
 		Addr:    cfg.RunAddr,
 		Handler: router,
 	}
 
-	// ---- запуск сервера в горутине ----
-	go func() {
-		if cfg.EnableHTTPS {
-			cert, err := certutil.GenerateSelfSignedCertificate(cfg.BaseURL, cfg.RunAddr)
-			if err != nil {
-				zapLogger.Fatal("failed to generate TLS certificate", zap.Error(err))
-			}
+	// ---- инициализация gRPC-сервера ----
+	grpcHandler := handler.NewGRPCServer(cfg.BaseURL, shorter, zapLogger, auditor)
 
-			tlsConfig := &tls.Config{
-				MinVersion:   tls.VersionTLS12,
-				Certificates: []tls.Certificate{cert},
-			}
+	grpcSrv := grpc.NewServer(
+		grpc.UnaryInterceptor(middleware.GRPCAuthInterceptor(zapLogger)),
+	)
+	pb.RegisterShortenerServiceServer(grpcSrv, grpcHandler)
 
-			listener, err := tls.Listen("tcp", cfg.RunAddr, tlsConfig)
-			if err != nil {
-				zapLogger.Fatal("failed to start HTTPS listener", zap.Error(err))
-			}
+	// ---- создание общего listener ----
+	var rootListener net.Listener
 
-			zapLogger.Info("server started (HTTPS)", zap.String("addr", cfg.RunAddr))
-
-			if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				zapLogger.Fatal("server failed", zap.Error(err))
-			}
-			return
+	if cfg.EnableHTTPS {
+		cert, err := certutil.GenerateSelfSignedCertificate(cfg.BaseURL, cfg.RunAddr)
+		if err != nil {
+			zapLogger.Fatal("failed to generate TLS certificate", zap.Error(err))
 		}
 
-		zapLogger.Info("server started (HTTP)", zap.String("addr", cfg.RunAddr))
-
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			zapLogger.Fatal("server failed", zap.Error(err))
+		tlsConfig := &tls.Config{
+			MinVersion:   tls.VersionTLS12,
+			Certificates: []tls.Certificate{cert},
 		}
-	}()
 
-	// ---- обработка сигналов ----
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+		rootListener, err = tls.Listen("tcp", cfg.RunAddr, tlsConfig)
+		if err != nil {
+			zapLogger.Fatal("failed to start HTTPS listener", zap.Error(err))
+		}
 
-	sig := <-quit
-	zapLogger.Info("shutdown signal received", zap.String("signal", sig.String()))
+		zapLogger.Info("server started (HTTPS + gRPC)", zap.String("addr", cfg.RunAddr))
+	} else {
+		rootListener, err = net.Listen("tcp", cfg.RunAddr)
+		if err != nil {
+			zapLogger.Fatal("failed to start listener", zap.Error(err))
+		}
+
+		zapLogger.Info("server started (HTTP + gRPC)", zap.String("addr", cfg.RunAddr))
+	}
+
+	// ---- cmux делит один listener на gRPC и HTTP ----
+	muxer := cmux.New(rootListener)
+
+	grpcListener := muxer.MatchWithWriters(
+		cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"),
+	)
+	httpListener := muxer.Match(cmux.Any())
+
+	// ---- контекст завершения по сигналам ----
+	signalCtx, stop := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT,
+	)
+	defer stop()
+
+	// ---- запуск серверов через errgroup ----
+	group, groupCtx := errgroup.WithContext(signalCtx)
+
+	group.Go(func() error {
+		err := grpcSrv.Serve(grpcListener)
+		if err != nil &&
+			!errors.Is(err, cmux.ErrListenerClosed) &&
+			!errors.Is(err, net.ErrClosed) {
+			return fmt.Errorf("grpc server failed: %w", err)
+		}
+		return nil
+	})
+
+	group.Go(func() error {
+		err := srv.Serve(httpListener)
+		if err != nil &&
+			!errors.Is(err, http.ErrServerClosed) &&
+			!errors.Is(err, cmux.ErrListenerClosed) &&
+			!errors.Is(err, net.ErrClosed) {
+			return fmt.Errorf("http server failed: %w", err)
+		}
+		return nil
+	})
+
+	group.Go(func() error {
+		err := muxer.Serve()
+		if err != nil &&
+			!errors.Is(err, cmux.ErrListenerClosed) &&
+			!errors.Is(err, net.ErrClosed) {
+			return fmt.Errorf("cmux failed: %w", err)
+		}
+		return nil
+	})
+
+	// ---- ожидание сигнала завершения или ошибки одной из goroutine ----
+	<-groupCtx.Done()
+
+	// ---- причины shutdown ----
+	if signalCtx.Err() != nil {
+		zapLogger.Info("shutdown signal received")
+	} else {
+		zapLogger.Error("shutdown started because one of the servers returned an error")
+	}
 
 	// ---- graceful shutdown ----
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
-		zapLogger.Error("server shutdown failed", zap.Error(err))
-	} else {
-		zapLogger.Info("server stopped gracefully")
+	// 1. закрываем корневой listener, чтобы новые соединения больше не принимались
+	if err := rootListener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		zapLogger.Error("failed to close root listener", zap.Error(err))
+	}
+
+	// 2. параллельная остановка gRPC и HTTP
+	shutdownGroup, _ := errgroup.WithContext(context.Background())
+
+	shutdownGroup.Go(func() error {
+		done := make(chan struct{})
+
+		go func() {
+			grpcSrv.GracefulStop()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			zapLogger.Info("grpc server stopped gracefully")
+			return nil
+		case <-time.After(5 * time.Second):
+			zapLogger.Warn("grpc graceful stop timeout, forcing stop")
+			grpcSrv.Stop()
+			return nil
+		}
+	})
+
+	shutdownGroup.Go(func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := srv.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("http server shutdown failed: %w", err)
+		}
+
+		zapLogger.Info("http server stopped gracefully")
+		return nil
+	})
+
+	if err := shutdownGroup.Wait(); err != nil {
+		zapLogger.Error("shutdown failed", zap.Error(err))
+	}
+
+	// 3. дожидаемся завершения серверных goroutine
+	if err := group.Wait(); err != nil {
+		zapLogger.Fatal("server failed", zap.Error(err))
 	}
 
 	// ---- закрытие ресурсов ----
